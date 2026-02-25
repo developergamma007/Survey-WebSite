@@ -8,6 +8,7 @@ import WardManagementTab from "./WardManagementTab";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { API_BASE_URL } from "@/lib/config";
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -65,7 +66,7 @@ export default function ResponsesPage() {
 
         const fetchResponses = async () => {
             try {
-                const res = await fetch("http://localhost:8000/api/responses", {
+                const res = await fetch(`${API_BASE_URL}/responses`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
