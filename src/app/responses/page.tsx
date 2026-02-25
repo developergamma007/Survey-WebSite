@@ -66,7 +66,7 @@ export default function ResponsesPage() {
 
         const fetchResponses = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/responses`, {
+                const res = await fetch(`${API_BASE_URL}/api/responses`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
