@@ -6,6 +6,7 @@ node_modules/
 out/
 
 # Environment variables (local overrides)
+.env
 .env.local
 .env.development
 .env.production
