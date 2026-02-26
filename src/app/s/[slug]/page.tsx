@@ -56,14 +56,14 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const fetchWardData = async () => {
         try {
-            const wardRes = await fetch(`${API_BASE_URL}/api/wards`);
+            const wardRes = await fetch(`${API_BASE_URL}/wards`);
             const allWards: Ward[] = await wardRes.json();
             const decodedName = decodeURIComponent(slug);
             const currentWard = allWards.find(w => w.ward_name_en === decodedName);
 
             if (currentWard) {
                 setWard(currentWard);
-                const qRes = await fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(currentWard.ward_name_en)}/questions`);
+                const qRes = await fetch(`${API_BASE_URL}/wards/${encodeURIComponent(currentWard.ward_name_en)}/questions`);
                 const qs = await qRes.json();
                 setQuestions(qs);
             }

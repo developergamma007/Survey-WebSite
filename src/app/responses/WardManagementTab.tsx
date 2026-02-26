@@ -35,7 +35,7 @@ export default function WardManagementTab() {
 
     const fetchWards = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wards`);
+            const res = await fetch(`${API_BASE_URL}/wards`);
             const data = await res.json();
             if (res.ok && Array.isArray(data)) {
                 setWards(data);
@@ -50,7 +50,7 @@ export default function WardManagementTab() {
     const fetchQuestions = async (wardName: string) => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(wardName)}/questions`);
+            const res = await fetch(`${API_BASE_URL}/wards/${encodeURIComponent(wardName)}/questions`);
             const data = await res.json();
             if (res.ok && Array.isArray(data)) {
                 setQuestions(data.map((q: any) => ({
@@ -70,7 +70,7 @@ export default function WardManagementTab() {
     const createWard = async () => {
         if (!newWardName) return;
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wards`, {
+            const res = await fetch(`${API_BASE_URL}/wards`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ward_name_en: newWardName }),
@@ -88,7 +88,7 @@ export default function WardManagementTab() {
         if (!selectedWard) return;
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(selectedWard.ward_name_en)}/questions`, {
+            const res = await fetch(`${API_BASE_URL}/wards/${encodeURIComponent(selectedWard.ward_name_en)}/questions`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(questions),

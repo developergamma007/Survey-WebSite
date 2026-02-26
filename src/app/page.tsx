@@ -173,7 +173,7 @@ export function Home() {
 
   const fetchDynamicQuestions = async (wardName: string) => {
     try {
-      const res = await axiosInstance.get(`/api/wards/${encodeURIComponent(wardName)}/questions`);
+      const res = await axiosInstance.get(`/wards/${encodeURIComponent(wardName)}/questions`);
       setDynamicQuestions(res.data);
     } catch (err) {
       console.error("Error fetching dynamic questions", err);
@@ -182,7 +182,7 @@ export function Home() {
 
   const fetchWards = async () => {
     try {
-      const response = await axiosInstance.get("/api/wards");
+      const response = await axiosInstance.get("/wards");
       setWards(response.data);
       setLoading(false);
     } catch (error) {
@@ -194,7 +194,7 @@ export function Home() {
 
   const fetchBooths = async (wardId: number) => {
     try {
-      const response = await axiosInstance.get("/api/booths", {
+      const response = await axiosInstance.get("/booths", {
         params: { ward_id: wardId },
       });
       setBooths(response.data);
