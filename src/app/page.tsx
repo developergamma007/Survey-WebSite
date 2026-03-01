@@ -24,8 +24,8 @@ interface DynamicQuestion {
 interface Booth {
   id: number;
   booth_no: string;
-  booth_name_en: string;
-  booth_name_local: string;
+  booth_add_en: string;
+  booth_add_local: string;
   ward_id: number;
 }
 
@@ -219,7 +219,7 @@ export function Home() {
       const selectedBooth = booths.find(b => b.id === parseInt(value));
       setForm((prev) => ({
         ...prev,
-        pollingStationName: selectedBooth?.booth_name_en || value,
+        pollingStationName: selectedBooth?.booth_add_en || value,
         pollingStationId: parseInt(value),
         pollingStationNumber: selectedBooth?.booth_no || prev.pollingStationNumber,
       }));
@@ -473,15 +473,15 @@ export function Home() {
                             placeholder="Select Polling Station"
                             options={booths.map((booth) => ({
                               id: booth.id,
-                              label: booth.booth_name_en,
-                              subLabel: booth.booth_name_local,
+                              label: booth.booth_add_en,
+                              subLabel: booth.booth_add_local,
                             }))}
                             value={form.pollingStationId}
                             onChange={(val: number | string) => {
                               const selectedBooth = booths.find((b) => b.id === val);
                               setForm((prev) => ({
                                 ...prev,
-                                pollingStationName: selectedBooth?.booth_name_en || "",
+                                pollingStationName: selectedBooth?.booth_add_en || "",
                                 pollingStationId: val as number,
                                 pollingStationNumber: selectedBooth?.booth_no || prev.pollingStationNumber,
                               }));
