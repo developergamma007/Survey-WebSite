@@ -337,7 +337,34 @@ export function Home() {
 
       if (res.status === 200) {
         setSubmitMessage("Survey submitted successfully!");
-        setForm({});
+        setForm({
+          assembly: "KR Puram",
+          gbaWard: "KR Puram",
+          gbaWardId: 0,
+          pollingStationName: "",
+          pollingStationId: 0,
+          pollingStationNumber: "",
+          surveyorName: form.surveyorName,
+          surveyorMobile: form.surveyorMobile,
+          interviewerName: "",
+          interviewerAge: "",
+          interviewerGender: "",
+          interviewerCaste: "",
+          interviewerCommunity: "",
+          interviewerMobile: "",
+          interviewerEducation: "",
+          interviewerWork: "",
+          q1: "",
+          q2: "",
+          q3: "",
+          q4: "",
+          candidatePriority1: "",
+          candidatePriority2: "",
+          candidatePriority3: "",
+          candidatePriority4: "",
+          candidatePriority5: "",
+          dynamicAnswers: {},
+        });
         setAudioUrl(null);
         setAudioBase64(null);
         setTimeout(() => {
