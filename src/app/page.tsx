@@ -337,34 +337,7 @@ export function Home() {
 
       if (res.status === 200) {
         setSubmitMessage("Survey submitted successfully!");
-        setForm({
-          assembly: "KR Puram",
-          gbaWard: "KR Puram",
-          gbaWardId: 1,
-          pollingStationName: "Gvt High School, Devasandra",
-          pollingStationId: 1,
-          pollingStationNumber: "9",
-          surveyorName: "Sai",
-          surveyorMobile: "728229",
-          interviewerName: "",
-          interviewerAge: "",
-          interviewerGender: "",
-          interviewerCaste: "",
-          interviewerCommunity: "",
-          interviewerMobile: "",
-          interviewerEducation: "",
-          interviewerWork: "",
-          q1: "",
-          q2: "",
-          q3: "",
-          q4: "",
-          candidatePriority1: "",
-          candidatePriority2: "",
-          candidatePriority3: "",
-          candidatePriority4: "",
-          candidatePriority5: "",
-          dynamicAnswers: {},
-        });
+        setForm({});
         setAudioUrl(null);
         setAudioBase64(null);
         setTimeout(() => {
