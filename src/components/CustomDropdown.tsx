@@ -31,10 +31,12 @@ export default function CustomDropdown({
 
     const selectedOption = options.find((opt) => opt.id === value);
 
-    const filteredOptions = options.filter((opt) =>
-        opt?.label?.toLowerCase().includes(search?.toLowerCase()) ||
-        (opt?.subLabel && opt?.subLabel?.toLowerCase().includes(search?.toLowerCase()))
-    );
+    const filteredOptions = options.filter((opt) => {
+        const label = String(opt?.label || "").toLowerCase();
+        const subLabel = String(opt?.subLabel || "").toLowerCase();
+        const searchTerm = String(search || "").toLowerCase();
+        return label.includes(searchTerm) || subLabel.includes(searchTerm);
+    });
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {

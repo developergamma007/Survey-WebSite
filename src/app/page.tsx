@@ -451,15 +451,15 @@ export function Home() {
                             placeholder="Select Polling Station"
                             options={booths.map((booth) => ({
                               id: booth.id,
-                              label: booth.booth_add_en,
-                              subLabel: booth.booth_add_local,
+                              label: booth.booth_add_en || `Booth No: ${booth.booth_no}`,
+                              subLabel: booth.booth_add_local || `Booth ${booth.booth_no}`,
                             }))}
                             value={form.pollingStationId}
                             onChange={(val: number | string) => {
                               const selectedBooth = booths.find((b) => b.id === val);
                               setForm((prev) => ({
                                 ...prev,
-                                pollingStationName: selectedBooth?.booth_add_en || "",
+                                pollingStationName: selectedBooth?.booth_add_en || `Booth ${selectedBooth?.booth_no}`,
                                 pollingStationId: val as number,
                                 pollingStationNumber: selectedBooth?.booth_no || prev.pollingStationNumber,
                               }));
