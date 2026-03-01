@@ -123,6 +123,7 @@ export function Home() {
 
   useEffect(() => {
     fetchWards();
+    console.log('testvs')
   }, []);
 
   useEffect(() => {
