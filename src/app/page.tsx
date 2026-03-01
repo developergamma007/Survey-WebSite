@@ -71,9 +71,9 @@ export function Home() {
   const [form, setForm] = useState<SurveyFormState>({
     assembly: "KR Puram",
     gbaWard: "KR Puram",
-    gbaWardId: 1,
+    gbaWardId: 0,
     pollingStationName: "Gvt High School, Devasandra",
-    pollingStationId: 1,
+    pollingStationId: 0,
     pollingStationNumber: "9",
     surveyorName: "Sai",
     surveyorMobile: "728229",
@@ -162,8 +162,13 @@ export function Home() {
   };
 
   useEffect(() => {
-    if (form.gbaWardId) {
+    if (form.gbaWardId > 0) {
       fetchBooths(form.gbaWardId);
+    }
+  }, [form.gbaWardId]);
+
+  useEffect(() => {
+    if (form.gbaWardId > 0 && wards.length > 0) {
       const selectedWard = wards.find(w => w.id === form.gbaWardId);
       if (selectedWard?.ward_name_en) {
         fetchDynamicQuestions(selectedWard.ward_name_en);
