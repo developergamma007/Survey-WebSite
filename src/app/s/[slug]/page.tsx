@@ -49,6 +49,8 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [submitMessage, setSubmitMessage] = useState<string | null>(null);
     const [respondentVerified, setRespondentVerified] = useState(false);
     const [verifying, setVerifying] = useState(false);
+    const [voterSuggestions, setVoterSuggestions] = useState<{ name_en: string, epic: string, house: string }[]>([]);
+    const [showDropdown, setShowDropdown] = useState(false);
 
     useEffect(() => {
         fetchWardData();
@@ -72,6 +74,50 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         } finally {
             setLoading(false);
         }
+    };
+
+    useEffect(() => {
+        const query = form.interviewerName;
+        if (!query || query.length < 1) {
+            setVoterSuggestions([]);
+            setShowDropdown(false);
+            return;
+        }
+
+        const fetchSuggestions = async () => {
+            try {
+                // Pass ward_id parameter to search voters for selected ward
+                const wardParam = ward?.id ? `&ward_id=${ward.id}` : "";
+                const res = await fetch(`${API_BASE_URL}/voters/search?q=${encodeURIComponent(query)}${wardParam}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setVoterSuggestions(data);
+                    setShowDropdown(data.length > 0);
+                }
+            } catch (err) {
+                console.error("Voter search failed", err);
+            }
+        };
+
+        const timer = setTimeout(fetchSuggestions, 150); // Faster debounce for "letter by letter" feel
+        return () => clearTimeout(timer);
+    }, [form.interviewerName, ward?.id]);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (!target.closest(".relative")) {
+                setShowDropdown(false);
+            }
+        };
+        window.addEventListener("mousedown", handleClickOutside);
+        return () => window.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const selectVoter = (voter: { name_en: string }) => {
+        setForm({ ...form, interviewerName: voter.name_en });
+        setVoterSuggestions([]);
+        setShowDropdown(false);
     };
 
     const startRecording = async () => {
@@ -240,15 +286,36 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                 Voter Information
                             </h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-1">
+                                <div className="space-y-1 relative">
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Full Name</label>
                                     <input
                                         required
                                         value={form.interviewerName}
                                         onChange={(e) => setForm({ ...form, interviewerName: e.target.value })}
+                                        onFocus={() => voterSuggestions.length > 0 && setShowDropdown(true)}
                                         placeholder="Enter name"
                                         className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
+                                    {showDropdown && (
+                                        <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                                            {voterSuggestions.map((v, i) => (
+                                                <button
+                                                    key={i}
+                                                    type="button"
+                                                    onClick={() => selectVoter(v)}
+                                                    className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 flex items-center justify-between"
+                                                >
+                                                    <div>
+                                                        <span className="block text-sm font-bold text-slate-900">{v.name_en}</span>
+                                                        <span className="block text-[10px] text-slate-400 font-medium">House: {v.house} | EPIC: {v.epic}</span>
+                                                    </div>
+                                                    <div className="w-5 h-5 rounded-full bg-indigo-50 flex items-center justify-center">
+                                                        <CheckCircle2 className="w-3 h-3 text-indigo-500" />
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Age</label>

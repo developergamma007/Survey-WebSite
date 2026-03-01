@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import axios from "axios";
+import { CheckCircle2 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
 import { API_BASE_URL } from "@/lib/config";
 
@@ -118,6 +119,8 @@ export function Home() {
   const [booths, setBooths] = useState<Booth[]>([]);
   const [dynamicQuestions, setDynamicQuestions] = useState<DynamicQuestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [voterSuggestions, setVoterSuggestions] = useState<{ name_en: string, epic: string, house: string }[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
 
   const searchParams = useSearchParams();
 
@@ -318,6 +321,50 @@ export function Home() {
     } else {
       setSubmitMessage("Geolocation not supported. Survey will continue without GPS data.");
     }
+  };
+
+  useEffect(() => {
+    const query = form.interviewerName;
+    if (!query || query.length < 1) {
+      setVoterSuggestions([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const fetchSuggestions = async () => {
+      try {
+        // Use /voters/search because baseURL already has /api
+        // Pass ward_id parameter to search voters for selected ward
+        const wardParam = form.gbaWardId ? `&ward_id=${form.gbaWardId}` : "";
+        const res = await axiosInstance.get(`/voters/search?q=${encodeURIComponent(query)}${wardParam}`);
+        if (res.status === 200) {
+          setVoterSuggestions(res.data);
+          setShowDropdown(res.data.length > 0);
+        }
+      } catch (err) {
+        console.error("Voter search failed", err);
+      }
+    };
+
+    const timer = setTimeout(fetchSuggestions, 150);
+    return () => clearTimeout(timer);
+  }, [form.interviewerName, form.gbaWardId]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest(".voter-input-container")) {
+        setShowDropdown(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectVoter = (voter: { name_en: string }) => {
+    setForm((prev) => ({ ...prev, interviewerName: voter.name_en }));
+    setVoterSuggestions([]);
+    setShowDropdown(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -524,15 +571,36 @@ export function Home() {
                       Voter Demographics
                     </h2>
                     <div className="space-y-5">
-                      <div className="space-y-1">
+                      <div className="space-y-1 relative voter-input-container">
                         <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Name</label>
                         <input
                           name="interviewerName"
                           value={form.interviewerName}
                           onChange={handleChange}
+                          onFocus={() => voterSuggestions.length > 0 && setShowDropdown(true)}
                           placeholder="Full Name"
                           className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                         />
+                        {showDropdown && (
+                          <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                            {voterSuggestions.map((v, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => selectVoter(v)}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 flex items-center justify-between"
+                              >
+                                <div>
+                                  <span className="block text-sm font-bold text-slate-900">{v.name_en}</span>
+                                  <span className="block text-[10px] text-slate-400 font-medium">House: {v.house} | EPIC: {v.epic}</span>
+                                </div>
+                                <div className="w-5 h-5 rounded-full bg-indigo-50 flex items-center justify-center">
+                                  <CheckCircle2 className="w-3 h-3 text-indigo-500" />
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
