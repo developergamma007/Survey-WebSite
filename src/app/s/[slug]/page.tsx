@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useRef, useState, use } from "react";
 import { Mic, MapPin, CheckCircle2, AlertCircle, Play, Square, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { API_BASE_URL } from "@/lib/config";
@@ -15,6 +15,88 @@ interface Ward {
     id: number;
     ward_name_en: string;
 }
+
+type VoterSuggestion = {
+    name_en?: string;
+    [key: string]: string | number | null | undefined;
+};
+
+const pickVoterValue = (voter: VoterSuggestion, keys: string[]): string => {
+    for (const key of keys) {
+        const value = voter[key];
+        if (value !== null && value !== undefined) {
+            const text = String(value).trim();
+            if (text) return text;
+        }
+    }
+    return "";
+};
+
+const normalizeOptionValue = (value: string, allowed: string[]): string => {
+    if (!value) return "";
+    const found = allowed.find((option) => option.toLowerCase() === value.toLowerCase());
+    return found ?? "";
+};
+
+const formatRelationType = (value: string): string => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return "Relation";
+    if (normalized === "father") return "Father";
+    if (normalized === "mother") return "Mother";
+    if (normalized === "husband") return "Husband";
+    if (normalized === "wife") return "Wife";
+    if (normalized === "guardian") return "Guardian";
+    return value;
+};
+
+const buildVoterDetailLines = (voter: VoterSuggestion): string[] => {
+    const lines: string[] = [];
+
+    const ward = pickVoterValue(voter, ["ward_code", "ward_no"]);
+    const booth = pickVoterValue(voter, ["booth_no", "booth"]);
+    const serial = pickVoterValue(voter, ["sl", "sl_no", "serial_no"]);
+    const house = pickVoterValue(voter, ["house"]);
+    const epic = pickVoterValue(voter, ["epic"]);
+    const kannadaName = pickVoterValue(voter, ["name_kannada"]);
+    const gender = pickVoterValue(voter, ["gender"]);
+    const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
+    const relType = formatRelationType(pickVoterValue(voter, ["rel_type", "relation_type"]));
+    const relEng = pickVoterValue(voter, ["rel_eng", "relation_name", "father_name", "mother_name", "guardian_name"]);
+    const relKannada = pickVoterValue(voter, ["rel_kannada", "relation_name_kannada"]);
+    const meta: string[] = [];
+
+    if (relEng || relKannada) {
+        lines.push(`${relType}: ${relEng || "-"} | ${relKannada || "-"}`);
+    }
+
+    if (ward) meta.push(`Ward ${ward}`);
+    if (booth) meta.push(`Booth ${booth}`);
+    if (serial) meta.push(`SL ${serial}`);
+    if (house) meta.push(`House ${house}`);
+    if (gender) meta.push(gender);
+    if (age) meta.push(`Age ${age}`);
+    if (meta.length) lines.push(meta.join(" | "));
+
+    return lines;
+};
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const highlightMatch = (value: string, query: string) => {
+    if (!query.trim()) return value;
+    const safeQuery = escapeRegExp(query.trim());
+    const regex = new RegExp(`(${safeQuery})`, "ig");
+    const parts = value.split(regex);
+    return parts.map((part, idx) =>
+        idx % 2 === 1 ? (
+            <mark key={idx} className="bg-yellow-200 text-slate-900 px-0.5 rounded">
+                {part}
+            </mark>
+        ) : (
+            <span key={idx}>{part}</span>
+        )
+    );
+};
 
 export default function WardSurvey({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = use(params);
@@ -49,8 +131,12 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [submitMessage, setSubmitMessage] = useState<string | null>(null);
     const [respondentVerified, setRespondentVerified] = useState(false);
     const [verifying, setVerifying] = useState(false);
-    const [voterSuggestions, setVoterSuggestions] = useState<{ name_en: string, epic: string, house: string }[]>([]);
+    const [voterSuggestions, setVoterSuggestions] = useState<VoterSuggestion[]>([]);
     const [showDropdown, setShowDropdown] = useState(false);
+    const [voterSearchQuery, setVoterSearchQuery] = useState("");
+    const [voterSearchAttempted, setVoterSearchAttempted] = useState(false);
+    const [voterSearchLoading, setVoterSearchLoading] = useState(false);
+    const skipNextVoterSearchRef = useRef(false);
 
     useEffect(() => {
         fetchWardData();
@@ -77,36 +163,49 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     };
 
     useEffect(() => {
-        const query = form.interviewerName;
-        if (!query || query.length < 1) {
+        if (skipNextVoterSearchRef.current) {
+            skipNextVoterSearchRef.current = false;
+            return;
+        }
+
+        const query = voterSearchQuery.trim();
+        if (!query) {
             setVoterSuggestions([]);
             setShowDropdown(false);
+            setVoterSearchAttempted(false);
+            setVoterSearchLoading(false);
             return;
         }
 
         const fetchSuggestions = async () => {
             try {
-                // Pass ward_id parameter to search voters for selected ward
-                const wardParam = ward?.id ? `&ward_id=${ward.id}` : "";
-                const res = await fetch(`${API_BASE_URL}/voters/search?q=${encodeURIComponent(query)}${wardParam}`);
+                setVoterSearchLoading(true);
+                const searchParams = new URLSearchParams({ q: query });
+                if (ward?.id) {
+                    searchParams.set("ward_id", String(ward.id));
+                }
+                const res = await fetch(`${API_BASE_URL}/voters/search?${searchParams.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
                     setVoterSuggestions(data);
-                    setShowDropdown(data.length > 0);
+                    setShowDropdown(true);
+                    setVoterSearchAttempted(true);
                 }
             } catch (err) {
                 console.error("Voter search failed", err);
+            } finally {
+                setVoterSearchLoading(false);
             }
         };
 
         const timer = setTimeout(fetchSuggestions, 150); // Faster debounce for "letter by letter" feel
         return () => clearTimeout(timer);
-    }, [form.interviewerName, ward?.id]);
+    }, [voterSearchQuery, ward?.id]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             const target = event.target as HTMLElement;
-            if (!target.closest(".relative")) {
+            if (!target.closest(".voter-input-container")) {
                 setShowDropdown(false);
             }
         };
@@ -114,8 +213,40 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         return () => window.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const selectVoter = (voter: { name_en: string }) => {
-        setForm({ ...form, interviewerName: voter.name_en });
+    const selectVoter = (voter: VoterSuggestion) => {
+        skipNextVoterSearchRef.current = true;
+
+        const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
+        const gender = normalizeOptionValue(
+            pickVoterValue(voter, ["gender", "sex", "interviewer_gender"]),
+            ["Male", "Female", "Other"]
+        );
+        const caste = normalizeOptionValue(
+            pickVoterValue(voter, ["caste", "interviewer_caste"]),
+            ["Brahma", "Lingayat", "Vokkaliga", "Kuruba", "SC", "ST", "OBC", "Others"]
+        );
+        const community = normalizeOptionValue(
+            pickVoterValue(voter, ["community", "religion", "interviewer_community"]),
+            ["Hindu", "Muslim", "Christian", "Jain", "Others"]
+        );
+        const education = normalizeOptionValue(
+            pickVoterValue(voter, ["education", "qualification", "interviewer_education"]),
+            ["Illiterate", "Primary", "Secondary", "Graduate", "Post-Graduate", "Others"]
+        );
+        const mobile = pickVoterValue(voter, ["mobile", "phone", "mobile_no", "voter_mobile", "interviewer_mobile"]);
+
+        setForm({
+            ...form,
+            interviewerName: String(voter.name_en ?? ""),
+            interviewerAge: age || form.interviewerAge,
+            interviewerGender: gender || form.interviewerGender,
+            interviewerCaste: caste || form.interviewerCaste,
+            interviewerCommunity: community || form.interviewerCommunity,
+            interviewerEducation: education || form.interviewerEducation,
+            interviewerMobile: mobile || form.interviewerMobile,
+        });
+        setVoterSearchQuery(String(voter.name_en ?? ""));
+        setVoterSearchAttempted(false);
         setVoterSuggestions([]);
         setShowDropdown(false);
     };
@@ -202,6 +333,10 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
             if (!res.ok) throw new Error("Submission failed");
 
             setSubmitMessage("Survey submitted successfully!");
+            setVoterSearchQuery("");
+            setVoterSearchAttempted(false);
+            setVoterSuggestions([]);
+            setShowDropdown(false);
             setTimeout(() => {
                 setIsSurveyStarted(false);
                 setForm({
@@ -286,19 +421,32 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                 Voter Information
                             </h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-1 relative">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Full Name</label>
+                                <div className="space-y-1 relative voter-input-container">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                                     <input
-                                        required
-                                        value={form.interviewerName}
-                                        onChange={(e) => setForm({ ...form, interviewerName: e.target.value })}
-                                        onFocus={() => voterSuggestions.length > 0 && setShowDropdown(true)}
-                                        placeholder="Enter name"
+                                        value={voterSearchQuery}
+                                        onChange={(e) => setVoterSearchQuery(e.target.value)}
+                                        onFocus={() => (voterSearchQuery.trim() || voterSearchAttempted) && setShowDropdown(true)}
+                                        placeholder="Type Name or EPIC"
                                         className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
                                     {showDropdown && (
                                         <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
-                                            {voterSuggestions.map((v, i) => (
+                                            {voterSearchLoading && (
+                                                <div className="px-4 py-3 text-[11px] font-semibold text-slate-500">Searching...</div>
+                                            )}
+                                            {!voterSearchLoading && voterSuggestions.length === 0 && voterSearchAttempted && (
+                                                <div className="px-4 py-3 text-[11px] font-semibold text-slate-500">
+                                                    No result found. Enter details manually below.
+                                                </div>
+                                            )}
+                                            {!voterSearchLoading && voterSuggestions.map((v, i) => {
+                                                const detailLines = buildVoterDetailLines(v);
+                                                const name = String(v.name_en ?? "Unknown");
+                                                const kannadaName = pickVoterValue(v, ["name_kannada"]);
+                                                const epic = pickVoterValue(v, ["epic"]);
+                                                const query = voterSearchQuery.trim();
+                                                return (
                                                 <button
                                                     key={i}
                                                     type="button"
@@ -306,16 +454,36 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                                     className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 flex items-center justify-between"
                                                 >
                                                     <div>
-                                                        <span className="block text-sm font-bold text-slate-900">{v.name_en}</span>
-                                                        <span className="block text-[10px] text-slate-400 font-medium">House: {v.house} | EPIC: {v.epic}</span>
+                                                        <span className="block text-sm font-bold text-slate-900">
+                                                            Name: {highlightMatch(name, query)}{kannadaName ? ` | ${kannadaName}` : ""}
+                                                        </span>
+                                                        {epic && (
+                                                            <span className="block text-[10px] text-slate-500 font-semibold">
+                                                                EPIC: {highlightMatch(epic, query)}
+                                                            </span>
+                                                        )}
+                                                        {detailLines.map((line, idx) => (
+                                                            <span key={idx} className="block text-[10px] text-slate-400 font-medium">{line}</span>
+                                                        ))}
                                                     </div>
                                                     <div className="w-5 h-5 rounded-full bg-indigo-50 flex items-center justify-center">
                                                         <CheckCircle2 className="w-3 h-3 text-indigo-500" />
                                                     </div>
                                                 </button>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     )}
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Full Name</label>
+                                    <input
+                                        required
+                                        value={form.interviewerName}
+                                        onChange={(e) => setForm({ ...form, interviewerName: e.target.value })}
+                                        placeholder="Enter name"
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                    />
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Age</label>

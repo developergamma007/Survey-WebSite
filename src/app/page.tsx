@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import axios from "axios";
@@ -29,6 +29,88 @@ interface Booth {
   booth_add_local: string;
   ward_id: number;
 }
+
+type VoterSuggestion = {
+  name_en?: string;
+  [key: string]: string | number | null | undefined;
+};
+
+const pickVoterValue = (voter: VoterSuggestion, keys: string[]): string => {
+  for (const key of keys) {
+    const value = voter[key];
+    if (value !== null && value !== undefined) {
+      const text = String(value).trim();
+      if (text) return text;
+    }
+  }
+  return "";
+};
+
+const normalizeOptionValue = (value: string, allowed: string[]): string => {
+  if (!value) return "";
+  const found = allowed.find((option) => option.toLowerCase() === value.toLowerCase());
+  return found ?? "";
+};
+
+const formatRelationType = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "Relation";
+  if (normalized === "father") return "Father";
+  if (normalized === "mother") return "Mother";
+  if (normalized === "husband") return "Husband";
+  if (normalized === "wife") return "Wife";
+  if (normalized === "guardian") return "Guardian";
+  return value;
+};
+
+const buildVoterDetailLines = (voter: VoterSuggestion): string[] => {
+  const lines: string[] = [];
+
+  const ward = pickVoterValue(voter, ["ward_code", "ward_no"]);
+  const booth = pickVoterValue(voter, ["booth_no", "booth"]);
+  const serial = pickVoterValue(voter, ["sl", "sl_no", "serial_no"]);
+  const house = pickVoterValue(voter, ["house"]);
+  const epic = pickVoterValue(voter, ["epic"]);
+  const kannadaName = pickVoterValue(voter, ["name_kannada"]);
+  const gender = pickVoterValue(voter, ["gender"]);
+  const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
+  const relType = formatRelationType(pickVoterValue(voter, ["rel_type", "relation_type"]));
+  const relEng = pickVoterValue(voter, ["rel_eng", "relation_name", "father_name", "mother_name", "guardian_name"]);
+  const relKannada = pickVoterValue(voter, ["rel_kannada", "relation_name_kannada"]);
+  const meta: string[] = [];
+
+  if (relEng || relKannada) {
+    lines.push(`${relType}: ${relEng || "-"} | ${relKannada || "-"}`);
+  }
+
+  if (ward) meta.push(`Ward ${ward}`);
+  if (booth) meta.push(`Booth ${booth}`);
+  if (serial) meta.push(`SL ${serial}`);
+  if (house) meta.push(`House ${house}`);
+  if (gender) meta.push(gender);
+  if (age) meta.push(`Age ${age}`);
+  if (meta.length) lines.push(meta.join(" | "));
+
+  return lines;
+};
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const highlightMatch = (value: string, query: string) => {
+  if (!query.trim()) return value;
+  const safeQuery = escapeRegExp(query.trim());
+  const regex = new RegExp(`(${safeQuery})`, "ig");
+  const parts = value.split(regex);
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <mark key={idx} className="bg-yellow-200 text-slate-900 px-0.5 rounded">
+        {part}
+      </mark>
+    ) : (
+      <span key={idx}>{part}</span>
+    )
+  );
+};
 
 interface SurveyFormState {
   assembly: string;
@@ -119,8 +201,12 @@ export function Home() {
   const [booths, setBooths] = useState<Booth[]>([]);
   const [dynamicQuestions, setDynamicQuestions] = useState<DynamicQuestion[]>([]);
   const [loading, setLoading] = useState(true);
-  const [voterSuggestions, setVoterSuggestions] = useState<{ name_en: string, epic: string, house: string }[]>([]);
+  const [voterSuggestions, setVoterSuggestions] = useState<VoterSuggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [voterSearchQuery, setVoterSearchQuery] = useState("");
+  const [voterSearchAttempted, setVoterSearchAttempted] = useState(false);
+  const [voterSearchLoading, setVoterSearchLoading] = useState(false);
+  const skipNextVoterSearchRef = useRef(false);
 
   const searchParams = useSearchParams();
 
@@ -324,31 +410,43 @@ export function Home() {
   };
 
   useEffect(() => {
-    const query = form.interviewerName;
-    if (!query || query.length < 1) {
+    if (skipNextVoterSearchRef.current) {
+      skipNextVoterSearchRef.current = false;
+      return;
+    }
+
+    const query = voterSearchQuery.trim();
+    if (!query) {
       setVoterSuggestions([]);
       setShowDropdown(false);
+      setVoterSearchAttempted(false);
+      setVoterSearchLoading(false);
       return;
     }
 
     const fetchSuggestions = async () => {
       try {
-        // Use /voters/search because baseURL already has /api
-        // Pass ward_id parameter to search voters for selected ward
-        const wardParam = form.gbaWardId ? `&ward_id=${form.gbaWardId}` : "";
-        const res = await axiosInstance.get(`/voters/search?q=${encodeURIComponent(query)}${wardParam}`);
+        setVoterSearchLoading(true);
+        const searchParams = new URLSearchParams({ q: query });
+        if (form.gbaWardId > 0) {
+          searchParams.set("ward_id", String(form.gbaWardId));
+        }
+        const res = await axiosInstance.get(`/voters/search?${searchParams.toString()}`);
         if (res.status === 200) {
           setVoterSuggestions(res.data);
-          setShowDropdown(res.data.length > 0);
+          setShowDropdown(true);
+          setVoterSearchAttempted(true);
         }
       } catch (err) {
         console.error("Voter search failed", err);
+      } finally {
+        setVoterSearchLoading(false);
       }
     };
 
     const timer = setTimeout(fetchSuggestions, 150);
     return () => clearTimeout(timer);
-  }, [form.interviewerName, form.gbaWardId]);
+  }, [voterSearchQuery, form.gbaWardId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -361,8 +459,40 @@ export function Home() {
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const selectVoter = (voter: { name_en: string }) => {
-    setForm((prev) => ({ ...prev, interviewerName: voter.name_en }));
+  const selectVoter = (voter: VoterSuggestion) => {
+    skipNextVoterSearchRef.current = true;
+
+    const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
+    const gender = normalizeOptionValue(
+      pickVoterValue(voter, ["gender", "sex", "interviewer_gender"]),
+      ["Male", "Female", "Other"]
+    );
+    const caste = normalizeOptionValue(
+      pickVoterValue(voter, ["caste", "interviewer_caste"]),
+      ["Brahma", "Lingayat", "Vokkaliga", "Kuruba", "SC", "ST", "OBC", "Others"]
+    );
+    const community = normalizeOptionValue(
+      pickVoterValue(voter, ["community", "religion", "interviewer_community"]),
+      ["Hindu", "Muslim", "Christian", "Jain", "Others"]
+    );
+    const education = normalizeOptionValue(
+      pickVoterValue(voter, ["education", "qualification", "interviewer_education"]),
+      ["Illiterate", "Primary", "Secondary", "Graduate", "Post-Graduate", "Others"]
+    );
+    const mobile = pickVoterValue(voter, ["mobile", "phone", "mobile_no", "voter_mobile", "interviewer_mobile"]);
+
+    setForm((prev) => ({
+      ...prev,
+      interviewerName: String(voter.name_en ?? ""),
+      interviewerAge: age || prev.interviewerAge,
+      interviewerGender: gender || prev.interviewerGender,
+      interviewerCaste: caste || prev.interviewerCaste,
+      interviewerCommunity: community || prev.interviewerCommunity,
+      interviewerEducation: education || prev.interviewerEducation,
+      interviewerMobile: mobile || prev.interviewerMobile,
+    }));
+    setVoterSearchQuery(String(voter.name_en ?? ""));
+    setVoterSearchAttempted(false);
     setVoterSuggestions([]);
     setShowDropdown(false);
   };
@@ -385,6 +515,10 @@ export function Home() {
 
       if (res.status === 200) {
         setSubmitMessage("Survey submitted successfully!");
+        setVoterSearchQuery("");
+        setVoterSearchAttempted(false);
+        setVoterSuggestions([]);
+        setShowDropdown(false);
         setForm({
           assembly: "KR Puram",
           gbaWard: "KR Puram",
@@ -572,18 +706,31 @@ export function Home() {
                     </h2>
                     <div className="space-y-5">
                       <div className="space-y-1 relative voter-input-container">
-                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Name</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                         <input
-                          name="interviewerName"
-                          value={form.interviewerName}
-                          onChange={handleChange}
-                          onFocus={() => voterSuggestions.length > 0 && setShowDropdown(true)}
-                          placeholder="Full Name"
+                          value={voterSearchQuery}
+                          onChange={(e) => setVoterSearchQuery(e.target.value)}
+                          onFocus={() => (voterSearchQuery.trim() || voterSearchAttempted) && setShowDropdown(true)}
+                          placeholder="Type Name or EPIC"
                           className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                         />
                         {showDropdown && (
                           <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
-                            {voterSuggestions.map((v, i) => (
+                            {voterSearchLoading && (
+                              <div className="px-4 py-3 text-[11px] font-semibold text-slate-500">Searching...</div>
+                            )}
+                            {!voterSearchLoading && voterSuggestions.length === 0 && voterSearchAttempted && (
+                              <div className="px-4 py-3 text-[11px] font-semibold text-slate-500">
+                                No result found. Enter details manually below.
+                              </div>
+                            )}
+                            {!voterSearchLoading && voterSuggestions.map((v, i) => {
+                              const detailLines = buildVoterDetailLines(v);
+                              const name = String(v.name_en ?? "Unknown");
+                              const kannadaName = pickVoterValue(v, ["name_kannada"]);
+                              const epic = pickVoterValue(v, ["epic"]);
+                              const query = voterSearchQuery.trim();
+                              return (
                               <button
                                 key={i}
                                 type="button"
@@ -591,16 +738,37 @@ export function Home() {
                                 className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 flex items-center justify-between"
                               >
                                 <div>
-                                  <span className="block text-sm font-bold text-slate-900">{v.name_en}</span>
-                                  <span className="block text-[10px] text-slate-400 font-medium">House: {v.house} | EPIC: {v.epic}</span>
+                                  <span className="block text-sm font-bold text-slate-900">
+                                    Name: {highlightMatch(name, query)}{kannadaName ? ` | ${kannadaName}` : ""}
+                                  </span>
+                                  {epic && (
+                                    <span className="block text-[10px] text-slate-500 font-semibold">
+                                      EPIC: {highlightMatch(epic, query)}
+                                    </span>
+                                  )}
+                                  
+                                  {detailLines.map((line, idx) => (
+                                    <span key={idx} className="block text-[10px] text-slate-400 font-medium">{line}</span>
+                                  ))}
                                 </div>
                                 <div className="w-5 h-5 rounded-full bg-indigo-50 flex items-center justify-center">
                                   <CheckCircle2 className="w-3 h-3 text-indigo-500" />
                                 </div>
                               </button>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Name</label>
+                        <input
+                          name="interviewerName"
+                          value={form.interviewerName}
+                          onChange={handleChange}
+                          placeholder="Full Name"
+                          className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                        />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
@@ -614,7 +782,6 @@ export function Home() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Gender</label>
                           <CustomDropdown
                             label="Gender"
                             placeholder="Select Gender"
@@ -630,7 +797,6 @@ export function Home() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Caste</label>
                           <CustomDropdown
                             label="Caste"
                             placeholder="Select Caste"
@@ -649,7 +815,6 @@ export function Home() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Community</label>
                           <CustomDropdown
                             label="Community"
                             placeholder="Select Community"
@@ -667,7 +832,6 @@ export function Home() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Education</label>
                           <CustomDropdown
                             label="Education"
                             placeholder="Select Education"
@@ -714,31 +878,6 @@ export function Home() {
                 <div className="space-y-8">
                   <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm h-full">
                     <div className="space-y-6">
-                      {["q1", "q2", "q3", "q4"].map((q, idx) => (
-                        <div key={q} className="space-y-3">
-                          <label className="text-xs font-bold text-slate-700 ml-1">
-                            {idx === 0 && "Current Preference"}
-                            {idx === 1 && "2023 Vote"}
-                            {idx === 2 && "2018 Vote"}
-                            {idx === 3 && "Family Preference"}
-                          </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {["Congress", "BJP", "JDS", "Others"].map((opt) => (
-                              <button
-                                key={opt}
-                                type="button"
-                                onClick={() => setForm((prev) => ({ ...prev, [q]: opt.toLowerCase() }))}
-                                className={`py-2 px-3 rounded-xl text-[10px] font-black uppercase transition-all border ${form[q as keyof SurveyFormState] === opt.toLowerCase()
-                                  ? "bg-indigo-600 border-indigo-600 text-white shadow-lg"
-                                  : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300"
-                                  }`}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
 
                       {/* Dynamic Questions */}
                       {dynamicQuestions.length > 0 && (
