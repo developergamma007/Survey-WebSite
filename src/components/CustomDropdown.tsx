@@ -16,6 +16,7 @@ interface CustomDropdownProps {
     onChange: (value: number | string) => void;
     placeholder: string;
     label?: string;
+    disabled?: boolean;
 }
 
 export default function CustomDropdown({
@@ -24,6 +25,7 @@ export default function CustomDropdown({
     onChange,
     placeholder,
     label,
+    disabled = false,
 }: CustomDropdownProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState("");
@@ -54,8 +56,9 @@ export default function CustomDropdown({
             <div className="relative">
                 <button
                     type="button"
-                    onClick={() => setIsOpen(!isOpen)}
-                    className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all flex items-center justify-between group"
+                    disabled={disabled}
+                    onClick={() => !disabled && setIsOpen(!isOpen)}
+                    className={cn("survey-dd-trigger", disabled && "opacity-50 cursor-not-allowed")}
                 >
                     <span className={cn("truncate", !selectedOption && "text-slate-400")}>
                         {selectedOption ? selectedOption.label : placeholder}
@@ -63,8 +66,8 @@ export default function CustomDropdown({
                     <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", isOpen && "rotate-180")} />
                 </button>
 
-                {isOpen && (
-                    <div className="absolute z-50 w-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top">
+                {isOpen && !disabled && (
+                    <div className="survey-dropdown-panel absolute z-50 w-full mt-2 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top">
                         <div className="p-2 border-b border-slate-50 flex items-center gap-2 bg-slate-50/50">
                             <Search className="w-4 h-4 text-slate-400 ml-2" />
                             <input

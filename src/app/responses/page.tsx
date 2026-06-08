@@ -66,7 +66,7 @@ export default function ResponsesPage() {
 
         const fetchResponses = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/responses`, {
+                const res = await fetch(`${API_BASE_URL}/api/responses`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
@@ -137,17 +137,16 @@ export default function ResponsesPage() {
     );
 
     return (
-        <div className="min-h-screen bg-[#f8fafc] font-sans text-gray-900 selection:bg-indigo-100 selection:text-indigo-900">
-            {/* Glossy Navbar */}
-            <nav className="sticky top-0 z-50 border-b border-gray-200/60 bg-white/80 backdrop-blur-md">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="min-h-screen ps-admin-page font-sans text-gray-900 selection:bg-indigo-100 selection:text-indigo-900">
+            <nav className="sticky top-0 z-50 border-b border-gray-200/50 bg-white/75 backdrop-blur-xl shadow-sm shadow-slate-200/30">
+                <div className="ps-content-area w-full">
                     <div className="flex h-16 justify-between items-center">
                         <div className="flex items-center gap-2">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-200">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-200/60 ring-1 ring-white/20">
                                 <Vote className="h-6 w-6" />
                             </div>
                             <h1 className="text-xl font-black tracking-tight text-gray-900">
-                                Survey<span className="text-indigo-600">Admin</span>
+                                PulseSync <span className="text-emerald-600">Admin</span>
                             </h1>
                             <div className="flex items-center gap-1.5 ml-4 rounded-full bg-indigo-50 px-2.5 py-1 border border-indigo-100">
                                 <div className="h-2 w-2 rounded-full bg-indigo-600 animate-pulse" />
@@ -169,7 +168,7 @@ export default function ResponsesPage() {
                 </div>
             </nav>
 
-            <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            <main className="ps-content-area w-full py-6 sm:py-8">
                 {/* Dashboard Header */}
                 <div className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
                     <div>

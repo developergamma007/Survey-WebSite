@@ -136,6 +136,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [voterSearchQuery, setVoterSearchQuery] = useState("");
     const [voterSearchAttempted, setVoterSearchAttempted] = useState(false);
     const [voterSearchLoading, setVoterSearchLoading] = useState(false);
+    const [selectedVoter, setSelectedVoter] = useState<VoterSuggestion | null>(null);
     const skipNextVoterSearchRef = useRef(false);
 
     useEffect(() => {
@@ -144,14 +145,14 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const fetchWardData = async () => {
         try {
-            const wardRes = await fetch(`${API_BASE_URL}/wards`);
+            const wardRes = await fetch(`${API_BASE_URL}/api/wards`);
             const allWards: Ward[] = await wardRes.json();
             const decodedName = decodeURIComponent(slug);
             const currentWard = allWards.find(w => w.ward_name_en === decodedName);
 
             if (currentWard) {
                 setWard(currentWard);
-                const qRes = await fetch(`${API_BASE_URL}/wards/${encodeURIComponent(currentWard.ward_name_en)}/questions`);
+                const qRes = await fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(currentWard.ward_name_en)}/questions`);
                 const qs = await qRes.json();
                 setQuestions(qs);
             }
@@ -184,7 +185,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                 if (ward?.id) {
                     searchParams.set("ward_id", String(ward.id));
                 }
-                const res = await fetch(`${API_BASE_URL}/voters/search?${searchParams.toString()}`);
+                const res = await fetch(`${API_BASE_URL}/api/voters/search?${searchParams.toString()}`);
                 if (res.ok) {
                     const data = await res.json();
                     setVoterSuggestions(data);
@@ -215,6 +216,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const selectVoter = (voter: VoterSuggestion) => {
         skipNextVoterSearchRef.current = true;
+        setSelectedVoter(voter);
 
         const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
         const gender = normalizeOptionValue(
@@ -280,12 +282,94 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         setAudioRecording(false);
     };
 
+    const fetchApproxLocation = async (): Promise<{ latitude: number; longitude: number } | null> => {
+        try {
+            const res = await fetch("https://ipapi.co/json/");
+            if (res.ok) {
+                const data = await res.json();
+                const lat = Number(data?.latitude);
+                const lon = Number(data?.longitude);
+                if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                    return { latitude: lat, longitude: lon };
+                }
+            }
+        } catch {
+            // Try next provider.
+        }
+
+        try {
+            const res = await fetch("https://ipwho.is/");
+            if (res.ok) {
+                const data = await res.json();
+                const lat = Number(data?.latitude);
+                const lon = Number(data?.longitude);
+                if (Number.isFinite(lat) && Number.isFinite(lon)) {
+                    return { latitude: lat, longitude: lon };
+                }
+            }
+        } catch {
+            return null;
+        }
+
+        return null;
+    };
+
     const captureLocation = () => {
-        if (!navigator.geolocation) return;
+        if (!navigator.geolocation) {
+            setSubmitMessage("Geolocation not supported. Survey will continue without GPS data.");
+            return;
+        }
+
+        if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+            setSubmitMessage("Location unavailable: use HTTPS (or localhost) to allow GPS.");
+            return;
+        }
+
+        const onSuccess = (pos: GeolocationPosition) => {
+            setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+            setSubmitMessage(null);
+        };
+
         navigator.geolocation.getCurrentPosition(
-            (pos) => setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-            () => setLocation({ latitude: null, longitude: null }),
-            { enableHighAccuracy: true }
+            onSuccess,
+            (error) => {
+                if (error.code === 1) {
+                    setSubmitMessage("Location permission denied. Survey will continue without GPS data.");
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    onSuccess,
+                    (fallbackError) => {
+                        const reasonByCode: { [key: number]: string } = {
+                            1: "Permission denied",
+                            2: "Position unavailable",
+                            3: "Request timeout",
+                        };
+                        const reason = reasonByCode[fallbackError.code] || "Unknown error";
+                        console.warn("Geolocation unavailable after fallback:", { code: fallbackError.code, reason });
+                        void (async () => {
+                            const approx = await fetchApproxLocation();
+                            if (approx) {
+                                setLocation(approx);
+                                // setSubmitMessage("GPS unavailable; using approximate network location.");
+                            } else {
+                                setSubmitMessage(`Location unavailable (${fallbackError.code}: ${reason}). Survey will continue without GPS data.`);
+                            }
+                        })();
+                    },
+                    {
+                        enableHighAccuracy: false,
+                        timeout: 20000,
+                        maximumAge: 120000,
+                    }
+                );
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0,
+            }
         );
     };
 
@@ -309,6 +393,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         stopRecording();
 
         try {
+            const voter = selectedVoter ?? ({} as VoterSuggestion);
             const payload = {
                 assembly: "Fixed (KR Puram)",
                 gbaWard: ward?.ward_name_en || decodeURIComponent(slug),
@@ -322,6 +407,18 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                 latitude: location.latitude,
                 longitude: location.longitude,
                 audio_base64: audioBase64,
+                voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
+                voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
+                voterGender: pickVoterValue(voter, ["gender"]) || form.interviewerGender || null,
+                voterAge: pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]) || form.interviewerAge || null,
+                voterWardCode: pickVoterValue(voter, ["ward_code", "ward_no"]) || null,
+                voterBoothNo: pickVoterValue(voter, ["booth_no", "booth"]) || null,
+                voterSlNo: pickVoterValue(voter, ["sl", "sl_no", "serial_no"]) || null,
+                voterHouse: pickVoterValue(voter, ["house"]) || null,
+                voterEpic: pickVoterValue(voter, ["epic"]) || null,
+                voterRelEng: pickVoterValue(voter, ["rel_eng", "relation_name", "father_name", "mother_name", "guardian_name"]) || null,
+                voterRelKannada: pickVoterValue(voter, ["rel_kannada", "relation_name_kannada"]) || null,
+                voterRelType: pickVoterValue(voter, ["rel_type", "relation_type"]) || null,
             };
 
             const res = await fetch(`${API_BASE_URL}/surveys`, {
@@ -337,6 +434,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
             setVoterSearchAttempted(false);
             setVoterSuggestions([]);
             setShowDropdown(false);
+            setSelectedVoter(null);
             setTimeout(() => {
                 setIsSurveyStarted(false);
                 setForm({
@@ -425,10 +523,13 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                                     <input
                                         value={voterSearchQuery}
-                                        onChange={(e) => setVoterSearchQuery(e.target.value)}
+                                        onChange={(e) => {
+                                            setVoterSearchQuery(e.target.value);
+                                            setSelectedVoter(null);
+                                        }}
                                         onFocus={() => (voterSearchQuery.trim() || voterSearchAttempted) && setShowDropdown(true)}
                                         placeholder="Type Name or EPIC"
-                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
                                     {showDropdown && (
                                         <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
@@ -482,7 +583,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                         value={form.interviewerName}
                                         onChange={(e) => setForm({ ...form, interviewerName: e.target.value })}
                                         placeholder="Enter name"
-                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
                                 </div>
                                 <div className="space-y-1">
@@ -562,7 +663,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                         value={form.interviewerWork}
                                         onChange={(e) => setForm({ ...form, interviewerWork: e.target.value })}
                                         placeholder="Occupation"
-                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
                                 </div>
                                 <div className="space-y-1">
@@ -572,7 +673,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                             value={form.interviewerMobile}
                                             onChange={(e) => setForm({ ...form, interviewerMobile: e.target.value })}
                                             placeholder="10-digit number"
-                                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                         />
                                         <button
                                             type="button"

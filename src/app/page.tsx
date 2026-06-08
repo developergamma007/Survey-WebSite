@@ -10,10 +10,17 @@ import { API_BASE_URL } from "@/lib/config";
 
 type PartyOption = "congress" | "bjp" | "jds" | "others" | "";
 
+interface Assembly {
+  assembly_no: number;
+  assembly_name_en: string;
+  assembly_name_local?: string | null;
+}
+
 interface Ward {
   id: number;
   ward_name_en: string;
   ward_name_local: string;
+  assembly_no?: string | null;
 }
 
 interface DynamicQuestion {
@@ -114,6 +121,7 @@ const highlightMatch = (value: string, query: string) => {
 
 interface SurveyFormState {
   assembly: string;
+  assemblyNo: number;
   gbaWard: string;
   gbaWardId: number;
   pollingStationName: string;
@@ -152,12 +160,13 @@ const axiosInstance = axios.create({
 export function Home() {
   const [username, setUsername] = useState<string | null>(null);
   const [form, setForm] = useState<SurveyFormState>({
-    assembly: "KR Puram",
-    gbaWard: "KR Puram",
+    assembly: "",
+    assemblyNo: 0,
+    gbaWard: "",
     gbaWardId: 0,
-    pollingStationName: "Gvt High School, Devasandra",
+    pollingStationName: "",
     pollingStationId: 0,
-    pollingStationNumber: "9",
+    pollingStationNumber: "",
     surveyorName: "Sai",
     surveyorMobile: "728229",
 
@@ -197,6 +206,7 @@ export function Home() {
   const [surveyorVerified, setSurveyorVerified] = useState(false);
   const [respondentVerified, setRespondentVerified] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [assemblies, setAssemblies] = useState<Assembly[]>([]);
   const [wards, setWards] = useState<Ward[]>([]);
   const [booths, setBooths] = useState<Booth[]>([]);
   const [dynamicQuestions, setDynamicQuestions] = useState<DynamicQuestion[]>([]);
@@ -206,13 +216,13 @@ export function Home() {
   const [voterSearchQuery, setVoterSearchQuery] = useState("");
   const [voterSearchAttempted, setVoterSearchAttempted] = useState(false);
   const [voterSearchLoading, setVoterSearchLoading] = useState(false);
+  const [selectedVoter, setSelectedVoter] = useState<VoterSuggestion | null>(null);
   const skipNextVoterSearchRef = useRef(false);
 
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    fetchWards();
-    console.log('testvs')
+    fetchAssemblies();
   }, []);
 
   useEffect(() => {
@@ -268,28 +278,44 @@ export function Home() {
 
   const fetchDynamicQuestions = async (wardName: string) => {
     try {
-      const res = await axiosInstance.get(`/wards/${encodeURIComponent(wardName)}/questions`);
+      const res = await axiosInstance.get(`/api/wards/${encodeURIComponent(wardName)}/questions`);
       setDynamicQuestions(res.data);
     } catch (err) {
       console.error("Error fetching dynamic questions", err);
     }
   };
 
-  const fetchWards = async () => {
+  const fetchAssemblies = async () => {
     try {
-      const response = await axiosInstance.get("/wards");
-      setWards(response.data);
+      const response = await axiosInstance.get<Assembly[]>("/api/assemblies");
+      setAssemblies(response.data);
       setLoading(false);
+    } catch (error) {
+      console.error("Error fetching assemblies:", error);
+      setSubmitMessage("Failed to load assemblies. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const fetchWards = async (assemblyNo: number) => {
+    if (!assemblyNo) {
+      setWards([]);
+      return;
+    }
+    try {
+      const response = await axiosInstance.get<Ward[]>("/api/wards", {
+        params: { assembly_no: assemblyNo },
+      });
+      setWards(response.data);
     } catch (error) {
       console.error("Error fetching wards:", error);
       setSubmitMessage("Failed to load wards. Please try again.");
-      setLoading(false);
     }
   };
 
   const fetchBooths = async (wardId: number) => {
     try {
-      const response = await axiosInstance.get("/booths", {
+      const response = await axiosInstance.get("/api/booths", {
         params: { ward_id: wardId },
       });
       setBooths(response.data);
@@ -379,34 +405,99 @@ export function Home() {
     setAudioRecording(false);
   };
 
-  const captureLocation = () => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocation({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-        },
-        (error) => {
-          const errorMessages: { [key: number]: string } = {
-            1: "Permission denied. Please enable location access in browser settings.",
-            2: "Position unavailable. Ensure location services are enabled on your device.",
-            3: "Request timeout. Location service took too long. Retrying...",
-          };
-          const message = errorMessages[error.code] || "Unknown geolocation error";
-          console.error("Error capturing placement:", message, error);
-          setSubmitMessage(`Location unavailable (${error.code}). Survey will continue without GPS data.`);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        },
-      );
-    } else {
-      setSubmitMessage("Geolocation not supported. Survey will continue without GPS data.");
+  const fetchApproxLocation = async (): Promise<{ latitude: number; longitude: number } | null> => {
+    try {
+      const res = await fetch("https://ipapi.co/json/");
+      if (res.ok) {
+        const data = await res.json();
+        const lat = Number(data?.latitude);
+        const lon = Number(data?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { latitude: lat, longitude: lon };
+        }
+      }
+    } catch {
+      // Try next provider.
     }
+
+    try {
+      const res = await fetch("https://ipwho.is/");
+      if (res.ok) {
+        const data = await res.json();
+        const lat = Number(data?.latitude);
+        const lon = Number(data?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { latitude: lat, longitude: lon };
+        }
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  const captureLocation = () => {
+    if (!("geolocation" in navigator)) {
+      setSubmitMessage("Geolocation not supported. Survey will continue without GPS data.");
+      return;
+    }
+
+    if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      setSubmitMessage("Location unavailable: use HTTPS (or localhost) to allow GPS.");
+      return;
+    }
+
+    const onSuccess = (position: GeolocationPosition) => {
+      setLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      setSubmitMessage(null);
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      onSuccess,
+      (error) => {
+        if (error.code === 1) {
+          setSubmitMessage("Location permission denied. Survey will continue without GPS data.");
+          return;
+        }
+
+        // Fallback: relaxed settings often work better on slower devices/network conditions.
+        navigator.geolocation.getCurrentPosition(
+          onSuccess,
+          (fallbackError) => {
+            const reasonByCode: { [key: number]: string } = {
+              1: "Permission denied",
+              2: "Position unavailable",
+              3: "Request timeout",
+            };
+            const reason = reasonByCode[fallbackError.code] || "Unknown error";
+            console.warn("Geolocation unavailable after fallback:", { code: fallbackError.code, reason });
+            void (async () => {
+              const approx = await fetchApproxLocation();
+              if (approx) {
+                setLocation(approx);
+                // setSubmitMessage("GPS unavailable; using approximate network location.");
+              } else {
+                setSubmitMessage(`Location unavailable (${fallbackError.code}: ${reason}). Survey will continue without GPS data.`);
+              }
+            })();
+          },
+          {
+            enableHighAccuracy: false,
+            timeout: 20000,
+            maximumAge: 120000,
+          },
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      },
+    );
   };
 
   useEffect(() => {
@@ -431,7 +522,7 @@ export function Home() {
         if (form.gbaWardId > 0) {
           searchParams.set("ward_id", String(form.gbaWardId));
         }
-        const res = await axiosInstance.get(`/voters/search?${searchParams.toString()}`);
+        const res = await axiosInstance.get(`/api/voters/search?${searchParams.toString()}`);
         if (res.status === 200) {
           setVoterSuggestions(res.data);
           setShowDropdown(true);
@@ -461,6 +552,7 @@ export function Home() {
 
   const selectVoter = (voter: VoterSuggestion) => {
     skipNextVoterSearchRef.current = true;
+    setSelectedVoter(voter);
 
     const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
     const gender = normalizeOptionValue(
@@ -503,12 +595,25 @@ export function Home() {
     stopRecording();
 
     try {
+      const voter = selectedVoter ?? ({} as VoterSuggestion);
       const payload = {
         ...form,
         latitude: location.latitude,
         longitude: location.longitude,
         audio_base64: audioBase64 || null,
         dynamicAnswers: JSON.stringify(form.dynamicAnswers),
+        voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
+        voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
+        voterGender: pickVoterValue(voter, ["gender"]) || form.interviewerGender || null,
+        voterAge: pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]) || form.interviewerAge || null,
+        voterWardCode: pickVoterValue(voter, ["ward_code", "ward_no"]) || null,
+        voterBoothNo: pickVoterValue(voter, ["booth_no", "booth"]) || null,
+        voterSlNo: pickVoterValue(voter, ["sl", "sl_no", "serial_no"]) || null,
+        voterHouse: pickVoterValue(voter, ["house"]) || null,
+        voterEpic: pickVoterValue(voter, ["epic"]) || null,
+        voterRelEng: pickVoterValue(voter, ["rel_eng", "relation_name", "father_name", "mother_name", "guardian_name"]) || null,
+        voterRelKannada: pickVoterValue(voter, ["rel_kannada", "relation_name_kannada"]) || null,
+        voterRelType: pickVoterValue(voter, ["rel_type", "relation_type"]) || null,
       };
 
       const res = await axiosInstance.post("/surveys", payload);
@@ -519,9 +624,13 @@ export function Home() {
         setVoterSearchAttempted(false);
         setVoterSuggestions([]);
         setShowDropdown(false);
+        setSelectedVoter(null);
+        setWards([]);
+        setBooths([]);
         setForm({
-          assembly: "KR Puram",
-          gbaWard: "KR Puram",
+          assembly: "",
+          assemblyNo: 0,
+          gbaWard: "",
           gbaWardId: 0,
           pollingStationName: "",
           pollingStationId: 0,
@@ -567,26 +676,21 @@ export function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
-        <div className="bg-gray-900 px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+    <div className="survey-page px-4 sm:px-6 lg:px-8">
+      <div className="survey-card">
+        <div className="survey-header flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="text-center sm:text-left">
-            <h1 className="text-2xl font-black text-white tracking-tight">
-              PulseSync <span className="text-green-500">Intelligence</span>
+            <h1>
+              PulseSync <span className="survey-brand-accent">Intelligence</span>
             </h1>
-            <p className="text-gray-400 text-[10px] uppercase tracking-[0.2em] mt-1 font-bold">
-              Real-time Field Survey Portal
-            </p>
+            <p className="survey-tagline">Real-time Field Survey Portal</p>
           </div>
 
           {username && (
-            <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-2xl border border-white/10">
+            <div className="relative z-[1] flex items-center gap-3 bg-white/5 px-4 py-2 rounded-2xl border border-white/10">
               <div className="text-right">
                 <p className="text-xs font-bold text-white">Hello, {username}</p>
-                <button
-                  onClick={handleLogout}
-                  className="text-[10px] font-bold text-gray-500 hover:text-red-400 transition-colors uppercase tracking-wider"
-                >
+                <button type="button" onClick={handleLogout} className="survey-logout-btn">
                   Sign Out
                 </button>
               </div>
@@ -597,59 +701,89 @@ export function Home() {
           )}
         </div>
 
-        <div className="p-8">
+        <div className="survey-body">
           {!isSurveyStarted ? (
-            <div className="py-24 flex flex-col items-center text-center">
-              <div className="relative w-44 h-44 mb-8">
-                {/* Pulsing Animated Circles */}
+            <div className="survey-hero">
+              <div className="survey-start-wrap">
                 <motion.div
                   animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
                   transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute inset-0 rounded-full bg-green-400/30 pointer-events-none"
+                  className="absolute inset-0 rounded-full bg-emerald-400/35 pointer-events-none"
                 />
                 <motion.div
                   animate={{ scale: [1, 2, 1], opacity: [0.3, 0, 0.3] }}
                   transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-                  className="absolute inset-0 rounded-full bg-green-400/20 pointer-events-none"
+                  className="absolute inset-0 rounded-full bg-emerald-400/20 pointer-events-none"
                 />
 
-                <button
-                  onClick={handleStartSurvey}
-                  className="relative z-10 w-44 h-44 bg-green-600 text-white rounded-full font-black text-xl shadow-2xl hover:bg-green-700 transition-all active:scale-95 flex items-center justify-center text-center leading-tight"
-                >
+                <button type="button" onClick={handleStartSurvey} className="survey-start-btn">
                   Start<br />Survey
                 </button>
               </div>
-              <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-2">Ready to collect data?</p>
-              <p className="text-slate-400 text-xs">Audio recording and GPS tracking will activate on start</p>
+              <p className="survey-hero-title">Ready to collect data?</p>
+              <p className="survey-hero-sub">Audio recording and GPS tracking will activate on start</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-10 animate-in fade-in duration-700">
               <div className="grid grid-cols-1 gap-8">
                 <div className="space-y-8">
-                  <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm">
-                    <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  <section className="survey-section">
+                    <h2 className="survey-section-title">
+                      <span className="survey-section-dot"></span>
                       Surveyor Information
                     </h2>
                     <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1 sm:col-span-2">
+                          <CustomDropdown
+                            label="Assembly Name"
+                            placeholder="Select Assembly"
+                            options={assemblies.map((a) => ({
+                              id: a.assembly_no,
+                              label: a.assembly_name_en,
+                              subLabel: a.assembly_name_local || undefined,
+                            }))}
+                            value={form.assemblyNo}
+                            onChange={(val: number | string) => {
+                              const assemblyNo = Number(val);
+                              const selected = assemblies.find((a) => a.assembly_no === assemblyNo);
+                              setBooths([]);
+                              setForm((prev) => ({
+                                ...prev,
+                                assemblyNo,
+                                assembly: selected?.assembly_name_en || "",
+                                gbaWard: "",
+                                gbaWardId: 0,
+                                pollingStationName: "",
+                                pollingStationId: 0,
+                                pollingStationNumber: "",
+                              }));
+                              fetchWards(assemblyNo);
+                            }}
+                          />
+                        </div>
+                      </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Ward Name"
-                            placeholder="Select Ward"
+                            placeholder={form.assemblyNo ? "Select Ward" : "Select assembly first"}
                             options={wards.map((ward) => ({
                               id: ward.id,
                               label: ward.ward_name_en,
                               subLabel: ward.ward_name_local,
                             }))}
                             value={form.gbaWardId}
+                            disabled={!form.assemblyNo}
                             onChange={(val: number | string) => {
                               const selectedWard = wards.find((w) => w.id === val);
                               setForm((prev) => ({
                                 ...prev,
                                 gbaWard: selectedWard?.ward_name_en || "",
                                 gbaWardId: val as number,
+                                pollingStationName: "",
+                                pollingStationId: 0,
+                                pollingStationNumber: "",
                               }));
                             }}
                           />
@@ -699,9 +833,9 @@ export function Home() {
                     </div>
                   </section>
 
-                  <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm">
-                    <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                  <section className="survey-section">
+                    <h2 className="survey-section-title">
+                      <span className="survey-section-dot survey-section-dot--green"></span>
                       Voter Demographics
                     </h2>
                     <div className="space-y-5">
@@ -709,13 +843,16 @@ export function Home() {
                         <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                         <input
                           value={voterSearchQuery}
-                          onChange={(e) => setVoterSearchQuery(e.target.value)}
+                          onChange={(e) => {
+                            setVoterSearchQuery(e.target.value);
+                            setSelectedVoter(null);
+                          }}
                           onFocus={() => (voterSearchQuery.trim() || voterSearchAttempted) && setShowDropdown(true)}
                           placeholder="Type Name or EPIC"
                           className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                         />
                         {showDropdown && (
-                          <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                          <div className="survey-dropdown-panel absolute z-50 left-0 right-0 top-full mt-2 overflow-hidden max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2 duration-200">
                             {voterSearchLoading && (
                               <div className="px-4 py-3 text-[11px] font-semibold text-slate-500">Searching...</div>
                             )}
@@ -860,10 +997,7 @@ export function Home() {
                               type="button"
                               onClick={() => simulateVerify("respondent")}
                               disabled={respondentVerified || verifying === "respondent"}
-                              className={`px-4 rounded-xl text-[10px] font-black uppercase transition-all border ${respondentVerified
-                                ? "bg-green-50 border-green-200 text-green-600"
-                                : "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700"
-                                }`}
+                              className={`survey-verify-btn ${respondentVerified ? "is-verified" : ""}`}
                             >
                               {verifying === "respondent" ? "..." : respondentVerified ? "OK" : "Verify"}
                             </button>
@@ -876,7 +1010,7 @@ export function Home() {
 
                 {/* Right Column: Dynamic Info */}
                 <div className="space-y-8">
-                  <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm h-full">
+                  <section className="survey-section h-full">
                     <div className="space-y-6">
 
                       {/* Dynamic Questions */}
@@ -895,10 +1029,7 @@ export function Home() {
                                       ...prev,
                                       dynamicAnswers: { ...prev.dynamicAnswers, [dq.text]: opt }
                                     }))}
-                                    className={`py-2 px-3 rounded-xl text-[10px] font-black uppercase transition-all border ${form.dynamicAnswers?.[dq.text] === opt
-                                      ? "bg-indigo-600 border-indigo-600 text-white shadow-lg"
-                                      : "bg-white border-slate-200 text-slate-500 hover:border-indigo-300"
-                                      }`}
+                                    className={`survey-option-btn ${form.dynamicAnswers?.[dq.text] === opt ? "is-selected" : ""}`}
                                   >
                                     {opt}
                                   </button>
@@ -932,10 +1063,7 @@ export function Home() {
               {/* Form Footer */}
               <div className="pt-8 border-t border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${audioRecording ? 'bg-red-50 border-red-200 text-red-600 pulse-soft' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-                    <div className={`w-2 h-2 rounded-full ${audioRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`}></div>
-                    <span className="text-[10px] font-black uppercase tracking-widest">{audioRecording ? "Recording Live" : "Mic Standby"}</span>
-                  </div>
+                
                   {location.latitude && (
                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600">
                       <span className="text-[10px] font-black tracking-tighter">GPS: {location.latitude.toFixed(4)}, {location.longitude?.toFixed(4)}</span>
@@ -949,11 +1077,7 @@ export function Home() {
                       {submitMessage}
                     </p>
                   )}
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-12 py-4 bg-gray-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all disabled:opacity-50 shadow-xl hover:shadow-2xl active:scale-95"
-                  >
+                  <button type="submit" disabled={submitting} className="survey-submit-btn">
                     {submitting ? "SUBMITTING..." : "COMPLETE SURVEY"}
                   </button>
                 </div>
@@ -962,9 +1086,7 @@ export function Home() {
           )}
         </div>
       </div >
-      <p className="mt-8 text-center text-slate-400 font-bold text-[10px] uppercase tracking-[0.4em]">
-        Proprietary Intelligence Platform • GBA
-      </p>
+      <p className="survey-footer">Proprietary Intelligence Platform • GBA</p>
 
       <style jsx global>{`
         @keyframes soft-pulse {

@@ -117,7 +117,7 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
             variants={containerVariants}
             initial="hidden"
             animate="visible"
-            className="space-y-8"
+            className="w-full min-w-0 space-y-8"
         >
             {/* Summary Cards */}
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
