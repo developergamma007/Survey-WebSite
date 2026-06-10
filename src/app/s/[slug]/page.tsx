@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, use } from "react";
 import { Mic, MapPin, CheckCircle2, AlertCircle, Play, Square, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { API_BASE_URL } from "@/lib/config";
+import { finalizeMediaRecorder } from "@/lib/audioRecording";
+import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
+import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
 
 interface Question {
     id: number;
@@ -103,6 +106,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [ward, setWard] = useState<Ward | null>(null);
     const [questions, setQuestions] = useState<Question[]>([]);
     const [isSurveyStarted, setIsSurveyStarted] = useState(false);
+    const [surveyStartedAt, setSurveyStartedAt] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     const [form, setForm] = useState({
@@ -114,11 +118,9 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         interviewerCommunity: "",
         interviewerEducation: "",
         interviewerWork: "",
-        candidatePriority1: "",
-        candidatePriority2: "",
-        candidatePriority3: "",
-        candidatePriority4: "",
-        candidatePriority5: "",
+        interviewerHouseholdIncome: "",
+        interviewerCurrentAddress: "",
+        voterOfConstituency: "",
     });
 
     const [dynamicAnswers, setDynamicAnswers] = useState<Record<string, string>>({});
@@ -126,6 +128,8 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [audioBase64, setAudioBase64] = useState<string | null>(null);
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<BlobPart[]>([]);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const [location, setLocation] = useState<{ latitude: number | null; longitude: number | null }>({ latitude: null, longitude: null });
     const [submitting, setSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState<string | null>(null);
@@ -257,17 +261,22 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const recorder = new MediaRecorder(stream);
-            const chunks: BlobPart[] = [];
-            recorder.ondataavailable = (e) => chunks.push(e.data);
-            recorder.onstop = () => {
-                const blob = new Blob(chunks, { type: "audio/webm" });
-                setAudioUrl(URL.createObjectURL(blob));
-                const reader = new FileReader();
-                reader.onloadend = () => setAudioBase64(reader.result as string);
-                reader.readAsDataURL(blob);
+            audioChunksRef.current = [];
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
             };
-            recorder.start();
+            recorder.onstop = () => {
+                const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+                if (blob.size > 0) {
+                    setAudioUrl(URL.createObjectURL(blob));
+                    const reader = new FileReader();
+                    reader.onloadend = () => setAudioBase64(reader.result as string);
+                    reader.readAsDataURL(blob);
+                }
+            };
+            recorder.start(1000);
             setMediaRecorder(recorder);
+            mediaRecorderRef.current = recorder;
             setAudioRecording(true);
         } catch {
             setSubmitMessage("Microphone access denied.");
@@ -275,9 +284,8 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     };
 
     const stopRecording = () => {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(t => t.stop());
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
         }
         setAudioRecording(false);
     };
@@ -382,6 +390,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     };
 
     const handleStartSurvey = () => {
+        setSurveyStartedAt(new Date().toISOString());
         setIsSurveyStarted(true);
         captureLocation();
         startRecording();
@@ -390,10 +399,40 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSubmitting(true);
-        stopRecording();
 
         try {
+            const recordedAudio = await finalizeMediaRecorder(
+                mediaRecorderRef.current,
+                audioChunksRef.current,
+                audioBase64
+            );
+            setAudioRecording(false);
+            if (recordedAudio) setAudioBase64(recordedAudio);
+
             const voter = selectedVoter ?? ({} as VoterSuggestion);
+            const structuredAnswers = buildStructuredDynamicAnswers({
+                assembly: "Fixed (KR Puram)",
+                gbaWard: ward?.ward_name_en || decodeURIComponent(slug),
+                pollingStationName: "Dynamic Link",
+                pollingStationNumber: "0",
+                surveyorName: "Web User",
+                surveyorMobile: "000000",
+                interviewerName: form.interviewerName,
+                interviewerAge: form.interviewerAge,
+                interviewerGender: form.interviewerGender,
+                interviewerCaste: form.interviewerCaste,
+                interviewerCommunity: form.interviewerCommunity,
+                interviewerMobile: form.interviewerMobile,
+                interviewerEducation: form.interviewerEducation,
+                interviewerWork: form.interviewerWork,
+                interviewerHouseholdIncome: form.interviewerHouseholdIncome,
+                interviewerCurrentAddress: form.interviewerCurrentAddress,
+                voterOfConstituency: form.voterOfConstituency,
+                dynamicAnswers,
+                surveyStartedAt,
+                surveyEndedAt: new Date().toISOString(),
+            });
+
             const payload = {
                 assembly: "Fixed (KR Puram)",
                 gbaWard: ward?.ward_name_en || decodeURIComponent(slug),
@@ -402,11 +441,11 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                 surveyorName: "Web User",
                 surveyorMobile: "000000",
                 ...form,
-                q1: "", q2: "", q3: "", q4: "", // Placeholders for standard fields
-                dynamicAnswers: JSON.stringify(dynamicAnswers),
+                q1: "", q2: "", q3: "", q4: "",
+                dynamicAnswers: JSON.stringify(structuredAnswers),
                 latitude: location.latitude,
                 longitude: location.longitude,
-                audio_base64: audioBase64,
+                audio_base64: recordedAudio,
                 voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
                 voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
                 voterGender: pickVoterValue(voter, ["gender"]) || form.interviewerGender || null,
@@ -440,8 +479,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                 setForm({
                     interviewerName: "", interviewerMobile: "", interviewerAge: "", interviewerGender: "",
                     interviewerCaste: "", interviewerCommunity: "", interviewerEducation: "", interviewerWork: "",
-                    candidatePriority1: "", candidatePriority2: "", candidatePriority3: "",
-                    candidatePriority4: "", candidatePriority5: "",
+                    interviewerHouseholdIncome: "", interviewerCurrentAddress: "", voterOfConstituency: "",
                 });
                 setDynamicAnswers({});
                 setAudioUrl(null);
@@ -658,11 +696,47 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                     </select>
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Work</label>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Occupation</label>
                                     <input
                                         value={form.interviewerWork}
                                         onChange={(e) => setForm({ ...form, interviewerWork: e.target.value })}
-                                        placeholder="Occupation"
+                                        placeholder="What do you do for a living?"
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter of Constituency</label>
+                                    <select
+                                        value={form.voterOfConstituency}
+                                        onChange={(e) => setForm({ ...form, voterOfConstituency: e.target.value })}
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none"
+                                    >
+                                        <option value="">Select</option>
+                                        <option value="Yes">Yes</option>
+                                        <option value="No">No</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Household Income</label>
+                                    <select
+                                        value={form.interviewerHouseholdIncome}
+                                        onChange={(e) => setForm({ ...form, interviewerHouseholdIncome: e.target.value })}
+                                        className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all appearance-none"
+                                    >
+                                        <option value="">Select</option>
+                                        <option value="Below 10,000">Below ₹10,000</option>
+                                        <option value="10,000 - 20,000">₹10,000 - ₹20,000</option>
+                                        <option value="20,000 - 50,000">₹20,000 - ₹50,000</option>
+                                        <option value="50,000 - 1,00,000">₹50,000 - ₹1,00,000</option>
+                                        <option value="Above 1,00,000">Above ₹1,00,000</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1 sm:col-span-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Current Address</label>
+                                    <input
+                                        value={form.interviewerCurrentAddress}
+                                        onChange={(e) => setForm({ ...form, interviewerCurrentAddress: e.target.value })}
+                                        placeholder="Enter current address"
                                         className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                                     />
                                 </div>
@@ -690,56 +764,16 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
                         {/* Dynamic Questions */}
                         {questions.length > 0 && (
-                            <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm">
-                                <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    Ward Specific Questions
-                                </h2>
-                                <div className="space-y-8">
-                                    {questions.map((q) => (
-                                        <div key={q.id} className="space-y-4">
-                                            <p className="text-sm font-bold text-slate-900 leading-relaxed">{q.text}</p>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                {q.options.split(",").map((opt, i) => (
-                                                    <button
-                                                        key={i}
-                                                        type="button"
-                                                        onClick={() => setDynamicAnswers({ ...dynamicAnswers, [q.text]: opt })}
-                                                        className={`w-full text-left px-5 py-3 rounded-2xl font-bold text-sm transition-all border shadow-sm ${dynamicAnswers[q.text] === opt
-                                                            ? "bg-indigo-600 border-indigo-600 text-white shadow-indigo-100"
-                                                            : "bg-white border-slate-200 text-slate-600 hover:border-indigo-300"
-                                                            }`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                            <section className="survey-section">
+                                <SurveyDynamicQuestions
+                                    questions={questions}
+                                    answers={dynamicAnswers}
+                                    onChange={(questionText, value) =>
+                                        setDynamicAnswers({ ...dynamicAnswers, [questionText]: value })
+                                    }
+                                />
                             </section>
                         )}
-
-                        {/* Candidate Priority */}
-                        <section className="bg-slate-50/80 rounded-3xl p-6 border border-slate-100 shadow-sm">
-                            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                                Corporator Preferences
-                            </h2>
-                            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                                {[1, 2, 3, 4, 5].map(num => (
-                                    <div key={num} className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Priority {num}</label>
-                                        <input
-                                            placeholder="..."
-                                            value={form[`candidatePriority${num}` as keyof typeof form]}
-                                            onChange={(e) => setForm({ ...form, [`candidatePriority${num}`]: e.target.value })}
-                                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
 
                         {/* Status & Submit */}
                         <div className="pt-8 border-t border-slate-200 flex items-center justify-between">

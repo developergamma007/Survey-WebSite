@@ -39,13 +39,10 @@ interface SurveyResponse {
     q3: string | null;
     q4: string | null;
 
-    candidate_priority1: string | null;
-    candidate_priority2: string | null;
-    candidate_priority3: string | null;
-
     latitude: number | null;
     longitude: number | null;
-    audio_base64: string | null;
+    audio_url: string | null;
+    has_audio?: boolean;
     created_at: string;
 }
 
@@ -96,17 +93,6 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
         value,
     }));
 
-    const candidateCounts: Record<string, number> = {};
-    data.forEach((r) => {
-        if (r.candidate_priority1) {
-            candidateCounts[r.candidate_priority1] = (candidateCounts[r.candidate_priority1] || 0) + 1;
-        }
-    });
-    const candidateData = Object.entries(candidateCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name, value]) => ({ name, value }));
-
     const totalResponses = data.length;
     const uniqueWards = new Set(data.map((r) => r.gba_ward)).size;
     const uniqueSurveyors = new Set(data.map((r) => r.surveyor_name)).size;
@@ -117,31 +103,31 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
             variants={containerVariants}
             initial="hidden"
             animate="visible"
-            className="w-full min-w-0 space-y-8"
+            className="w-full min-w-0 space-y-3"
         >
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <StatCard
-                    icon={<Users className="h-6 w-6" />}
+                    icon={<Users className="h-4 w-4" />}
                     label="Total Responses"
                     value={totalResponses}
                     color="blue"
                     trend="+12% from last week"
                 />
                 <StatCard
-                    icon={<MapPin className="h-6 w-6" />}
+                    icon={<MapPin className="h-4 w-4" />}
                     label="Unique Wards"
                     value={uniqueWards}
                     color="green"
                 />
                 <StatCard
-                    icon={<Activity className="h-6 w-6" />}
+                    icon={<Activity className="h-4 w-4" />}
                     label="Active Surveyors"
                     value={uniqueSurveyors}
                     color="amber"
                 />
                 <StatCard
-                    icon={<Vote className="h-6 w-6" />}
+                    icon={<Vote className="h-4 w-4" />}
                     label="Top Party Trend"
                     value={topParty}
                     color="purple"
@@ -150,9 +136,9 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
             </div>
 
             {/* Charts Grid */}
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-                <ChartContainer title="Party Preferences (Cumulative)" icon={<TrendingUp className="h-5 w-5 text-indigo-500" />}>
-                    <div className="h-72 w-full">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <ChartContainer title="Party Preferences (Cumulative)" icon={<TrendingUp className="h-4 w-4 text-indigo-500" />}>
+                    <div className="h-48 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={partyData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -172,17 +158,17 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
                     </div>
                 </ChartContainer>
 
-                <ChartContainer title="Respondent Gender Distribution" icon={<Users className="h-5 w-5 text-emerald-500" />}>
-                    <div className="h-72 w-full">
+                <ChartContainer title="Respondent Gender Distribution" icon={<Users className="h-4 w-4 text-emerald-500" />}>
+                    <div className="h-48 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie
                                     data={genderData}
                                     cx="50%"
                                     cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={90}
-                                    paddingAngle={5}
+                                    innerRadius={40}
+                                    outerRadius={65}
+                                    paddingAngle={4}
                                     dataKey="value"
                                 >
                                     {genderData.map((entry, index) => (
@@ -192,24 +178,8 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
                                 <Tooltip
                                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                                 />
-                                <Legend verticalAlign="bottom" height={36} />
+                                <Legend verticalAlign="bottom" height={24} iconSize={8} wrapperStyle={{ fontSize: 10 }} />
                             </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </ChartContainer>
-
-                <ChartContainer title="Top Candidates (Priority 1)" icon={<Vote className="h-5 w-5 text-orange-500" />} className="lg:col-span-2">
-                    <div className="h-80 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={candidateData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} />
-                                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} width={120} />
-                                <Tooltip
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={24} />
-                            </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </ChartContainer>
@@ -237,26 +207,26 @@ function StatCard({ icon, label, value, color, trend, isText = false }: {
         <motion.div
             variants={itemVariants}
             whileHover={{ y: -5 }}
-            className="relative overflow-hidden rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100"
+            className="relative overflow-hidden rounded-lg bg-white p-2.5 shadow-sm ring-1 ring-gray-100"
         >
-            <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-sm font-medium text-gray-500">{label}</p>
-                    <h3 className={`mt-1 font-bold text-gray-900 ${isText ? 'text-xl' : 'text-3xl'}`}>
+            <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                    <p className="text-[10px] font-medium text-gray-500 truncate">{label}</p>
+                    <h3 className={`mt-0.5 font-bold text-gray-900 truncate ${isText ? 'text-sm' : 'text-lg'}`}>
                         {value}
                     </h3>
                 </div>
-                <div className={`rounded-xl p-3 ${colorClasses[color]}`}>
+                <div className={`rounded-md p-1.5 shrink-0 ${colorClasses[color]}`}>
                     {icon}
                 </div>
             </div>
             {trend && (
-                <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                    <ArrowUpRight className="mr-1 h-3 w-3" />
+                <div className="mt-1.5 flex items-center text-[10px] font-medium text-emerald-600">
+                    <ArrowUpRight className="mr-0.5 h-2.5 w-2.5" />
                     {trend}
                 </div>
             )}
-            <div className="absolute -bottom-1 -right-1 h-12 w-12 opacity-[0.03]">
+            <div className="absolute -bottom-1 -right-1 h-8 w-8 opacity-[0.03]">
                 {icon}
             </div>
         </motion.div>
@@ -267,11 +237,11 @@ function ChartContainer({ title, children, icon, className = "" }: { title: stri
     return (
         <motion.div
             variants={itemVariants}
-            className={`rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100 ${className}`}
+            className={`rounded-lg bg-white p-3 shadow-sm ring-1 ring-gray-100 ${className}`}
         >
-            <div className="mb-6 flex items-center gap-2">
+            <div className="mb-2 flex items-center gap-1.5">
                 {icon}
-                <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+                <h3 className="text-xs font-semibold text-gray-900">{title}</h3>
             </div>
             {children}
         </motion.div>

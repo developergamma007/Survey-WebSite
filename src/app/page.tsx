@@ -6,7 +6,11 @@ import { motion } from "framer-motion";
 import axios from "axios";
 import { CheckCircle2 } from "lucide-react";
 import CustomDropdown from "@/components/CustomDropdown";
+import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
 import { API_BASE_URL } from "@/lib/config";
+import { isAdminSubmitter } from "@/lib/adminUsers";
+import { finalizeMediaRecorder } from "@/lib/audioRecording";
+import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 
 type PartyOption = "congress" | "bjp" | "jds" | "others" | "";
 
@@ -20,7 +24,7 @@ interface Ward {
   id: number;
   ward_name_en: string;
   ward_name_local: string;
-  assembly_no?: string | null;
+  assembly_no?: number | null;
 }
 
 interface DynamicQuestion {
@@ -138,17 +142,15 @@ interface SurveyFormState {
   interviewerMobile: string;
   interviewerEducation: string;
   interviewerWork: string;
+  interviewerHouseholdIncome: string;
+  interviewerCurrentAddress: string;
+  voterOfConstituency: string;
 
   q1: PartyOption;
   q2: PartyOption;
   q3: PartyOption;
   q4: PartyOption;
 
-  candidatePriority1: string;
-  candidatePriority2: string;
-  candidatePriority3: string;
-  candidatePriority4: string;
-  candidatePriority5: string;
   dynamicAnswers: Record<string, string>;
 }
 
@@ -167,8 +169,8 @@ export function Home() {
     pollingStationName: "",
     pollingStationId: 0,
     pollingStationNumber: "",
-    surveyorName: "Sai",
-    surveyorMobile: "728229",
+    surveyorName: "",
+    surveyorMobile: "",
 
     interviewerName: "",
     interviewerAge: "",
@@ -178,17 +180,15 @@ export function Home() {
     interviewerMobile: "",
     interviewerEducation: "",
     interviewerWork: "",
+    interviewerHouseholdIncome: "",
+    interviewerCurrentAddress: "",
+    voterOfConstituency: "",
 
     q1: "",
     q2: "",
     q3: "",
     q4: "",
 
-    candidatePriority1: "",
-    candidatePriority2: "",
-    candidatePriority3: "",
-    candidatePriority4: "",
-    candidatePriority5: "",
     dynamicAnswers: {},
   });
 
@@ -196,6 +196,8 @@ export function Home() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [location, setLocation] = useState<{
     latitude: number | null;
     longitude: number | null;
@@ -203,6 +205,7 @@ export function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [isSurveyStarted, setIsSurveyStarted] = useState(false);
+  const [surveyStartedAt, setSurveyStartedAt] = useState<string | null>(null);
   const [surveyorVerified, setSurveyorVerified] = useState(false);
   const [respondentVerified, setRespondentVerified] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -222,22 +225,36 @@ export function Home() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    fetchAssemblies();
+    const boot = async () => {
+      await Promise.all([fetchAssemblies(), fetchAllWards()]);
+    };
+    boot();
   }, []);
 
   useEffect(() => {
-    const wardName = searchParams.get("ward");
-    if (wardName && wards.length > 0) {
-      const ward = wards.find(w => w.ward_name_en === wardName);
-      if (ward) {
-        setForm(prev => ({
-          ...prev,
-          gbaWard: ward.ward_name_en,
-          gbaWardId: ward.id
-        }));
-      }
+    const wardName = decodeURIComponent(searchParams.get("ward") || "").trim();
+    if (!wardName || wards.length === 0) return;
+
+    const ward = wards.find((w) => w.ward_name_en === wardName);
+    if (!ward) return;
+
+    const assemblyNo = ward.assembly_no ? Number(ward.assembly_no) : 0;
+    const assemblyRow = assemblies.find((a) => a.assembly_no === assemblyNo);
+
+    setForm((prev) => ({
+      ...prev,
+      gbaWard: ward.ward_name_en,
+      gbaWardId: ward.id,
+      assemblyNo,
+      assembly: assemblyRow?.assembly_name_en || prev.assembly,
+    }));
+
+    fetchDynamicQuestions(ward.ward_name_en);
+    fetchBooths(ward.id);
+    if (!isAdminSubmitter(username)) {
+      setIsSurveyStarted(true);
     }
-  }, [searchParams, wards]);
+  }, [searchParams, wards, assemblies, username]);
   // Check for user session
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -289,17 +306,26 @@ export function Home() {
     try {
       const response = await axiosInstance.get<Assembly[]>("/api/assemblies");
       setAssemblies(response.data);
-      setLoading(false);
     } catch (error) {
       console.error("Error fetching assemblies:", error);
-      setSubmitMessage("Failed to load assemblies. Please try again.");
+    } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAllWards = async () => {
+    try {
+      const response = await axiosInstance.get<Ward[]>("/api/wards");
+      setWards(response.data);
+    } catch (error) {
+      console.error("Error fetching wards:", error);
+      setSubmitMessage("Failed to load wards. Please try again.");
     }
   };
 
   const fetchWards = async (assemblyNo: number) => {
     if (!assemblyNo) {
-      setWards([]);
+      await fetchAllWards();
       return;
     }
     try {
@@ -357,24 +383,29 @@ export function Home() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
-      const chunks: BlobPart[] = [];
+      audioChunksRef.current = [];
 
       recorder.ondataavailable = (event) => {
-        chunks.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        setAudioUrl(URL.createObjectURL(blob));
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setAudioBase64(reader.result as string);
-        };
-        reader.readAsDataURL(blob);
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        if (blob.size > 0) {
+          setAudioUrl(URL.createObjectURL(blob));
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setAudioBase64(reader.result as string);
+          };
+          reader.readAsDataURL(blob);
+        }
       };
 
-      recorder.start();
+      recorder.start(1000);
       setMediaRecorder(recorder);
+      mediaRecorderRef.current = recorder;
       setAudioRecording(true);
     } catch (error) {
       console.error("Error starting audio recording:", error);
@@ -392,15 +423,15 @@ export function Home() {
   };
 
   const handleStartSurvey = () => {
+    setSurveyStartedAt(new Date().toISOString());
     setIsSurveyStarted(true);
     captureLocation();
     startRecording();
   };
 
   const stopRecording = () => {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-      mediaRecorder.stop();
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
     }
     setAudioRecording(false);
   };
@@ -591,17 +622,57 @@ export function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAdminSubmitter(username)) {
+      setSubmitMessage("Admin accounts cannot submit surveys. Use the responses dashboard only.");
+      return;
+    }
+    if (!form.surveyorName.trim()) {
+      setSubmitMessage("Surveyor name is required before submitting.");
+      return;
+    }
     setSubmitting(true);
-    stopRecording();
 
     try {
+      const recordedAudio = await finalizeMediaRecorder(
+        mediaRecorderRef.current,
+        audioChunksRef.current,
+        audioBase64
+      );
+      setAudioRecording(false);
+      if (recordedAudio) {
+        setAudioBase64(recordedAudio);
+      }
+
       const voter = selectedVoter ?? ({} as VoterSuggestion);
+      const structuredAnswers = buildStructuredDynamicAnswers({
+        assembly: form.assembly,
+        gbaWard: form.gbaWard,
+        pollingStationName: form.pollingStationName,
+        pollingStationNumber: form.pollingStationNumber,
+        surveyorName: form.surveyorName,
+        surveyorMobile: form.surveyorMobile,
+        interviewerName: form.interviewerName,
+        interviewerAge: form.interviewerAge,
+        interviewerGender: form.interviewerGender,
+        interviewerCaste: form.interviewerCaste,
+        interviewerCommunity: form.interviewerCommunity,
+        interviewerMobile: form.interviewerMobile,
+        interviewerEducation: form.interviewerEducation,
+        interviewerWork: form.interviewerWork,
+        interviewerHouseholdIncome: form.interviewerHouseholdIncome,
+        interviewerCurrentAddress: form.interviewerCurrentAddress,
+        voterOfConstituency: form.voterOfConstituency,
+        dynamicAnswers: form.dynamicAnswers,
+        surveyStartedAt,
+        surveyEndedAt: new Date().toISOString(),
+      });
+
       const payload = {
         ...form,
         latitude: location.latitude,
         longitude: location.longitude,
-        audio_base64: audioBase64 || null,
-        dynamicAnswers: JSON.stringify(form.dynamicAnswers),
+        audio_base64: recordedAudio || null,
+        dynamicAnswers: JSON.stringify(structuredAnswers),
         voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
         voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
         voterGender: pickVoterValue(voter, ["gender"]) || form.interviewerGender || null,
@@ -616,7 +687,10 @@ export function Home() {
         voterRelType: pickVoterValue(voter, ["rel_type", "relation_type"]) || null,
       };
 
-      const res = await axiosInstance.post("/surveys", payload);
+      const token = localStorage.getItem("token");
+      const res = await axiosInstance.post("/surveys", payload, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
 
       if (res.status === 200) {
         setSubmitMessage("Survey submitted successfully!");
@@ -645,19 +719,18 @@ export function Home() {
           interviewerMobile: "",
           interviewerEducation: "",
           interviewerWork: "",
+          interviewerHouseholdIncome: "",
+          interviewerCurrentAddress: "",
+          voterOfConstituency: "",
           q1: "",
           q2: "",
           q3: "",
           q4: "",
-          candidatePriority1: "",
-          candidatePriority2: "",
-          candidatePriority3: "",
-          candidatePriority4: "",
-          candidatePriority5: "",
           dynamicAnswers: {},
         });
         setAudioUrl(null);
         setAudioBase64(null);
+        setSurveyStartedAt(null);
         setTimeout(() => {
           setSubmitMessage(null);
           setIsSurveyStarted(false);
@@ -666,7 +739,12 @@ export function Home() {
     } catch (error) {
       console.error("Error submitting survey:", error);
       if (axios.isAxiosError(error)) {
-        setSubmitMessage(`Error: ${error.response?.data?.message || error.message}`);
+        const detail = (error.response?.data as { detail?: string } | undefined)?.detail;
+        if (error.response?.status === 403) {
+          setSubmitMessage(detail || "Admin accounts cannot submit surveys.");
+        } else {
+          setSubmitMessage(`Error: ${detail || error.message}`);
+        }
       } else {
         setSubmitMessage("Error connecting to the server.");
       }
@@ -702,7 +780,17 @@ export function Home() {
         </div>
 
         <div className="survey-body">
-          {!isSurveyStarted ? (
+          {isAdminSubmitter(username) ? (
+            <div className="survey-hero">
+              <p className="survey-hero-title">Admin access only</p>
+              <p className="survey-hero-sub">
+                Signed-in admin accounts cannot submit field surveys. Open the responses dashboard to review data and manage survey flow.
+              </p>
+              <a href="/responses" className="survey-submit-btn inline-flex items-center justify-center no-underline mt-4">
+                Open Responses Dashboard
+              </a>
+            </div>
+          ) : !isSurveyStarted ? (
             <div className="survey-hero">
               <div className="survey-start-wrap">
                 <motion.div
@@ -724,9 +812,9 @@ export function Home() {
               <p className="survey-hero-sub">Audio recording and GPS tracking will activate on start</p>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-10 animate-in fade-in duration-700">
-              <div className="grid grid-cols-1 gap-8">
-                <div className="space-y-8">
+            <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-700">
+              <div className="grid grid-cols-1 gap-5">
+                <div className="space-y-5">
                   <section className="survey-section">
                     <h2 className="survey-section-title">
                       <span className="survey-section-dot"></span>
@@ -810,22 +898,30 @@ export function Home() {
                           />
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Booth No</label>
-                          <input
-                            name="pollingStationNumber"
-                            value={form.pollingStationNumber}
-                            readOnly
-                            className="w-full bg-slate-100 px-4 py-3 rounded-xl border border-transparent text-sm font-bold text-slate-600"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Surveyor Name</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
+                            Surveyor Name <span className="text-red-500">*</span>
+                          </label>
                           <input
                             name="surveyorName"
                             value={form.surveyorName}
                             onChange={handleChange}
+                            required
+                            placeholder="Enter surveyor name"
+                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Surveyor Phone Number</label>
+                          <input
+                            name="surveyorMobile"
+                            value={form.surveyorMobile}
+                            onChange={handleChange}
+                            type="tel"
+                            inputMode="numeric"
+                            maxLength={10}
+                            placeholder="10-digit mobile"
                             className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                           />
                         </div>
@@ -1004,6 +1100,63 @@ export function Home() {
                           </div>
                         </div>
                       </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <CustomDropdown
+                            label="Voter of Constituency"
+                            placeholder="Are you a voter here?"
+                            options={[
+                              { id: "Yes", label: "Yes" },
+                              { id: "No", label: "No" },
+                            ]}
+                            value={form.voterOfConstituency}
+                            onChange={(val: number | string) => updateField("voterOfConstituency", val as string)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <CustomDropdown
+                            label="Household Income"
+                            placeholder="Select income range"
+                            options={[
+                              { id: "Below 10,000", label: "Below ₹10,000" },
+                              { id: "10,000 - 20,000", label: "₹10,000 - ₹20,000" },
+                              { id: "20,000 - 50,000", label: "₹20,000 - ₹50,000" },
+                              { id: "50,000 - 1,00,000", label: "₹50,000 - ₹1,00,000" },
+                              { id: "Above 1,00,000", label: "Above ₹1,00,000" },
+                            ]}
+                            value={form.interviewerHouseholdIncome}
+                            onChange={(val: number | string) => updateField("interviewerHouseholdIncome", val as string)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Occupation</label>
+                          <input
+                            name="interviewerWork"
+                            value={form.interviewerWork}
+                            onChange={handleChange}
+                            placeholder="What do you do for a living?"
+                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Current Address</label>
+                          <input
+                            name="interviewerCurrentAddress"
+                            value={form.interviewerCurrentAddress}
+                            onChange={handleChange}
+                            placeholder="Enter current address"
+                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+                      {form.gbaWard ? (
+                        <p className="text-[10px] font-semibold text-slate-400">
+                          Village / Ward for this record: <span className="text-slate-600">{form.gbaWard}</span>
+                          {form.assembly ? ` · ${form.assembly}` : ""}
+                        </p>
+                      ) : null}
                     </div>
                   </section>
                 </div>
@@ -1014,47 +1167,16 @@ export function Home() {
                     <div className="space-y-6">
 
                       {/* Dynamic Questions */}
-                      {dynamicQuestions.length > 0 && (
-                        <div className="pt-4 border-t border-slate-200 space-y-6">
-                          <label className="text-xs font-black text-indigo-400 uppercase tracking-widest block mb-4">Ward Specific Questions</label>
-                          {dynamicQuestions.map((dq) => (
-                            <div key={dq.id} className="space-y-3">
-                              <label className="text-xs font-bold text-slate-700 ml-1">{dq.text}</label>
-                              <div className="grid grid-cols-2 gap-2">
-                                {dq.options.split(",").map((opt) => (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => setForm(prev => ({
-                                      ...prev,
-                                      dynamicAnswers: { ...prev.dynamicAnswers, [dq.text]: opt }
-                                    }))}
-                                    className={`survey-option-btn ${form.dynamicAnswers?.[dq.text] === opt ? "is-selected" : ""}`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="pt-4 border-t border-slate-200">
-                        <label className="text-xs font-bold text-slate-700 mb-4 block">Candidate Priorities</label>
-                        <div className="space-y-3">
-                          {[1, 2, 3, 4, 5].map((num) => (
-                            <input
-                              key={num}
-                              placeholder={`Priority ${num}`}
-                              name={`candidatePriority${num}`}
-                              value={form[`candidatePriority${num}` as keyof SurveyFormState] as string}
-                              onChange={handleChange}
-                              className="w-full bg-white px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-                            />
-                          ))}
-                        </div>
-                      </div>
+                      <SurveyDynamicQuestions
+                        questions={dynamicQuestions}
+                        answers={form.dynamicAnswers}
+                        onChange={(questionText, value) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            dynamicAnswers: { ...prev.dynamicAnswers, [questionText]: value },
+                          }))
+                        }
+                      />
                     </div>
                   </section>
                 </div>

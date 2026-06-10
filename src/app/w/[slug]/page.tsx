@@ -5,5 +5,5 @@ export default function WardLinkPage({ params }: { params: Promise<{ slug: strin
     const { slug } = use(params);
     // Redirect to home with the ward name as a query parameter
     // 'slug' here refers to the path parameter [slug]
-    redirect(`/?ward=${slug}`);
+    redirect(`/?ward=${encodeURIComponent(slug)}`);
 }
