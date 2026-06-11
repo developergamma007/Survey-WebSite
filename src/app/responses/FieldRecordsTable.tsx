@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronDown, Download, MapPin } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
 import { FieldRecordAudio } from "@/components/FieldRecordAudio";
@@ -25,11 +25,36 @@ type Props = {
 
 function columnClassName(key: string, isDynamic?: boolean): string {
   if (key === "id") return "ps-col-narrow";
-  if (key === "audio" || key === "geotag") return "ps-col-audio";
+  if (key === "audio") return "ps-col-audio";
+  if (key === "geotag") return "ps-col-geotag";
   if (key === "village" || key === "voter_of_constituency" || key === "polling_station" || isDynamic) {
     return "ps-col-wide";
   }
   return "";
+}
+
+const GEOTAG_COL_PX = 200;
+
+const geotagCellStyle: CSSProperties = {
+  width: GEOTAG_COL_PX,
+  minWidth: GEOTAG_COL_PX,
+  maxWidth: GEOTAG_COL_PX,
+  paddingLeft: 16,
+  paddingRight: 16,
+  textAlign: "center",
+  boxSizing: "border-box",
+};
+
+function columnWidthStyle(key: string): CSSProperties | undefined {
+  if (key === "id") return { width: 80 };
+  if (key === "audio") return { width: 72 };
+  if (key === "geotag") return { width: GEOTAG_COL_PX };
+  return undefined;
+}
+
+function cellStyle(key: string): CSSProperties | undefined {
+  if (key === "geotag") return geotagCellStyle;
+  return undefined;
 }
 
 function RecordCell({
@@ -50,15 +75,17 @@ function RecordCell({
   if (col.key === "geotag") {
     if (row.latitude != null && row.longitude != null) {
       return (
-        <a
-          href={`https://www.google.com/maps?q=${row.latitude},${row.longitude}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ps-field-records-geotag"
-        >
-          <MapPin size={11} />
-          Open
-        </a>
+        <div className="ps-geotag-wrap">
+          <a
+            href={`https://www.google.com/maps?q=${row.latitude},${row.longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ps-field-records-geotag"
+          >
+            <MapPin size={11} />
+            Open
+          </a>
+        </div>
       );
     }
     return <span className="ps-cell-empty">—</span>;
@@ -210,6 +237,15 @@ export default function FieldRecordsTable({ responses }: Props) {
       <div className="ps-field-records-table-shell">
         <div ref={scrollRef} className="ps-field-records-table-scroll">
           <table className="ps-field-records-table">
+            <colgroup>
+              {visibleColumns.map((col) => (
+                <col
+                  key={col.key}
+                  className={columnClassName(col.key, col.isDynamic)}
+                  style={columnWidthStyle(col.key)}
+                />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 {visibleColumns.map((col) => (
@@ -218,6 +254,7 @@ export default function FieldRecordsTable({ responses }: Props) {
                     scope="col"
                     title={col.label}
                     className={columnClassName(col.key, col.isDynamic)}
+                    style={cellStyle(col.key)}
                   >
                     <span className="ps-th-label">{col.label}</span>
                   </th>
@@ -239,6 +276,7 @@ export default function FieldRecordsTable({ responses }: Props) {
                         <td
                           key={`${row.id}-${col.key}`}
                           className={columnClassName(col.key, col.isDynamic)}
+                          style={cellStyle(col.key)}
                         >
                           <RecordCell row={row} col={col} />
                         </td>

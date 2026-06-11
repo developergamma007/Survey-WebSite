@@ -461,6 +461,36 @@
   text-align: center;
 }
 
+.ps-field-records-table col.ps-col-geotag {
+  width: 176px;
+}
+
+.ps-field-records-table th.ps-col-geotag,
+.ps-field-records-table td.ps-col-geotag {
+  width: 176px !important;
+  min-width: 176px !important;
+  max-width: 176px !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.ps-geotag-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.ps-field-records-table td.ps-col-geotag .ps-field-records-geotag {
+  width: fit-content;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
 .ps-field-records-table .ps-col-wide {
   min-width: 140px !important;
   max-width: 240px !important;
@@ -536,8 +566,9 @@
 .ps-field-records-geotag {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 10px;
   font-weight: 700;
@@ -546,6 +577,8 @@
   border: 1px solid #e0e7ff;
   text-decoration: none;
   transition: background 0.15s ease;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .ps-field-records-geotag:hover {

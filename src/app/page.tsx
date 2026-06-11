@@ -23,6 +23,12 @@ import {
   mergeFieldConfig,
   type SurveyFieldConfig,
 } from "@/lib/surveyFieldConfig";
+import {
+  buildVoterDetailLines,
+  buildVoterFormPatch,
+  pickVoterValue,
+  type VoterSuggestion,
+} from "@/lib/voterSearch";
 
 type PartyOption = "congress" | "bjp" | "jds" | "others" | "";
 
@@ -52,70 +58,6 @@ interface Booth {
   booth_add_local: string;
   ward_id: number;
 }
-
-type VoterSuggestion = {
-  name_en?: string;
-  [key: string]: string | number | null | undefined;
-};
-
-const pickVoterValue = (voter: VoterSuggestion, keys: string[]): string => {
-  for (const key of keys) {
-    const value = voter[key];
-    if (value !== null && value !== undefined) {
-      const text = String(value).trim();
-      if (text) return text;
-    }
-  }
-  return "";
-};
-
-const normalizeOptionValue = (value: string, allowed: string[]): string => {
-  if (!value) return "";
-  const found = allowed.find((option) => option.toLowerCase() === value.toLowerCase());
-  return found ?? "";
-};
-
-const formatRelationType = (value: string): string => {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return "Relation";
-  if (normalized === "father") return "Father";
-  if (normalized === "mother") return "Mother";
-  if (normalized === "husband") return "Husband";
-  if (normalized === "wife") return "Wife";
-  if (normalized === "guardian") return "Guardian";
-  return value;
-};
-
-const buildVoterDetailLines = (voter: VoterSuggestion): string[] => {
-  const lines: string[] = [];
-
-  const ward = pickVoterValue(voter, ["ward_code", "ward_no"]);
-  const booth = pickVoterValue(voter, ["booth_no", "booth"]);
-  const serial = pickVoterValue(voter, ["sl", "sl_no", "serial_no"]);
-  const house = pickVoterValue(voter, ["house"]);
-  const epic = pickVoterValue(voter, ["epic"]);
-  const kannadaName = pickVoterValue(voter, ["name_kannada"]);
-  const gender = pickVoterValue(voter, ["gender"]);
-  const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
-  const relType = formatRelationType(pickVoterValue(voter, ["rel_type", "relation_type"]));
-  const relEng = pickVoterValue(voter, ["rel_eng", "relation_name", "father_name", "mother_name", "guardian_name"]);
-  const relKannada = pickVoterValue(voter, ["rel_kannada", "relation_name_kannada"]);
-  const meta: string[] = [];
-
-  if (relEng || relKannada) {
-    lines.push(`${relType}: ${relEng || "-"} | ${relKannada || "-"}`);
-  }
-
-  if (ward) meta.push(`Ward ${ward}`);
-  if (booth) meta.push(`Booth ${booth}`);
-  if (serial) meta.push(`SL ${serial}`);
-  if (house) meta.push(`House ${house}`);
-  if (gender) meta.push(gender);
-  if (age) meta.push(`Age ${age}`);
-  if (meta.length) lines.push(meta.join(" | "));
-
-  return lines;
-};
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -622,35 +564,19 @@ export function Home() {
   const selectVoter = (voter: VoterSuggestion) => {
     skipNextVoterSearchRef.current = true;
     setSelectedVoter(voter);
-
-    const age = pickVoterValue(voter, ["age", "voter_age", "interviewer_age"]);
-    const gender = normalizeOptionValue(
-      pickVoterValue(voter, ["gender", "sex", "interviewer_gender"]),
-      ["Male", "Female", "Other"]
-    );
-    const caste = normalizeOptionValue(
-      pickVoterValue(voter, ["caste", "interviewer_caste"]),
-      ["Brahma", "Lingayat", "Vokkaliga", "Kuruba", "SC", "ST", "OBC", "Others"]
-    );
-    const community = normalizeOptionValue(
-      pickVoterValue(voter, ["community", "religion", "interviewer_community"]),
-      ["Hindu", "Muslim", "Christian", "Jain", "Others"]
-    );
-    const education = normalizeOptionValue(
-      pickVoterValue(voter, ["education", "qualification", "interviewer_education"]),
-      ["Illiterate", "Primary", "Secondary", "Graduate", "Post-Graduate", "Others"]
-    );
-    const mobile = pickVoterValue(voter, ["mobile", "phone", "mobile_no", "voter_mobile", "interviewer_mobile"]);
+    const patch = buildVoterFormPatch(voter);
 
     setForm((prev) => ({
       ...prev,
-      interviewerName: String(voter.name_en ?? ""),
-      interviewerAge: age || prev.interviewerAge,
-      interviewerGender: gender || prev.interviewerGender,
-      interviewerCaste: caste || prev.interviewerCaste,
-      interviewerCommunity: community || prev.interviewerCommunity,
-      interviewerEducation: education || prev.interviewerEducation,
-      interviewerMobile: mobile || prev.interviewerMobile,
+      interviewerName: patch.interviewerName || prev.interviewerName,
+      interviewerAge: patch.interviewerAge || prev.interviewerAge,
+      interviewerGender: patch.interviewerGender || prev.interviewerGender,
+      interviewerCaste: patch.interviewerCaste || prev.interviewerCaste,
+      interviewerCommunity: patch.interviewerCommunity || prev.interviewerCommunity,
+      interviewerEducation: patch.interviewerEducation || prev.interviewerEducation,
+      interviewerMobile: patch.interviewerMobile || prev.interviewerMobile,
+      interviewerWork: patch.interviewerWork || prev.interviewerWork,
+      interviewerCurrentAddress: patch.interviewerCurrentAddress || prev.interviewerCurrentAddress,
     }));
     setVoterSearchQuery(String(voter.name_en ?? ""));
     setVoterSearchAttempted(false);
