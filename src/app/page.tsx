@@ -11,6 +11,18 @@ import { API_BASE_URL } from "@/lib/config";
 import { isAdminSubmitter } from "@/lib/adminUsers";
 import { finalizeMediaRecorder } from "@/lib/audioRecording";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
+import {
+  digitsOnly,
+  validateMobileOptional,
+  resolveOthersValue,
+  isOthersSelection,
+} from "@/lib/mobileValidation";
+import { uploadSurveyAudio } from "@/lib/surveyAudioUpload";
+import {
+  DEFAULT_SURVEY_FIELD_CONFIG,
+  mergeFieldConfig,
+  type SurveyFieldConfig,
+} from "@/lib/surveyFieldConfig";
 
 type PartyOption = "congress" | "bjp" | "jds" | "others" | "";
 
@@ -138,9 +150,12 @@ interface SurveyFormState {
   interviewerAge: string;
   interviewerGender: string;
   interviewerCaste: string;
+  interviewerCasteOther: string;
   interviewerCommunity: string;
+  interviewerCommunityOther: string;
   interviewerMobile: string;
   interviewerEducation: string;
+  interviewerEducationOther: string;
   interviewerWork: string;
   interviewerHouseholdIncome: string;
   interviewerCurrentAddress: string;
@@ -176,9 +191,12 @@ export function Home() {
     interviewerAge: "",
     interviewerGender: "",
     interviewerCaste: "",
+    interviewerCasteOther: "",
     interviewerCommunity: "",
+    interviewerCommunityOther: "",
     interviewerMobile: "",
     interviewerEducation: "",
+    interviewerEducationOther: "",
     interviewerWork: "",
     interviewerHouseholdIncome: "",
     interviewerCurrentAddress: "",
@@ -221,15 +239,35 @@ export function Home() {
   const [voterSearchLoading, setVoterSearchLoading] = useState(false);
   const [selectedVoter, setSelectedVoter] = useState<VoterSuggestion | null>(null);
   const skipNextVoterSearchRef = useRef(false);
+  const [fieldConfig, setFieldConfig] = useState<SurveyFieldConfig>(DEFAULT_SURVEY_FIELD_CONFIG);
+  const [isCustomWard, setIsCustomWard] = useState(false);
+  const [customWardName, setCustomWardName] = useState("");
+  const [customQuestions, setCustomQuestions] = useState<Array<{ id: string; text: string; options: string }>>([]);
 
   const searchParams = useSearchParams();
+  const useManualAssembly = fieldConfig.manualEntryWhenApiEmpty && assemblies.length === 0;
+  const useManualWard = fieldConfig.manualEntryWhenApiEmpty && (isCustomWard || wards.length === 0);
+  const useManualBooth = fieldConfig.manualEntryWhenApiEmpty && (useManualWard || booths.length === 0);
+  const showVoterSearch =
+    fieldConfig.enableVoterSearch && !useManualWard && wards.length > 0 && form.gbaWardId > 0;
+  const sf = fieldConfig.surveyorFields;
+  const vf = fieldConfig.voterFields;
 
   useEffect(() => {
     const boot = async () => {
-      await Promise.all([fetchAssemblies(), fetchAllWards()]);
+      await Promise.all([fetchAssemblies(), fetchAllWards(), fetchFieldConfig()]);
     };
     boot();
   }, []);
+
+  const fetchFieldConfig = async () => {
+    try {
+      const res = await axiosInstance.get<SurveyFieldConfig>("/api/survey-form-config");
+      setFieldConfig(mergeFieldConfig(res.data));
+    } catch {
+      setFieldConfig(DEFAULT_SURVEY_FIELD_CONFIG);
+    }
+  };
 
   useEffect(() => {
     const wardName = decodeURIComponent(searchParams.get("ward") || "").trim();
@@ -620,6 +658,23 @@ export function Home() {
     setShowDropdown(false);
   };
 
+  const refreshLocation = (): Promise<{ latitude: number | null; longitude: number | null }> =>
+    new Promise((resolve) => {
+      if (!("geolocation" in navigator)) {
+        resolve(location);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          setLocation(coords);
+          resolve(coords);
+        },
+        () => resolve(location),
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isAdminSubmitter(username)) {
@@ -628,6 +683,18 @@ export function Home() {
     }
     if (!form.surveyorName.trim()) {
       setSubmitMessage("Surveyor name is required before submitting.");
+      return;
+    }
+    const mobileErr =
+      validateMobileOptional(form.surveyorMobile, "Surveyor mobile") ||
+      validateMobileOptional(form.interviewerMobile, "Voter mobile");
+    if (mobileErr) {
+      setSubmitMessage(mobileErr);
+      return;
+    }
+    const wardName = isCustomWard ? customWardName.trim() : form.gbaWard;
+    if ((sf.ward ?? true) && !wardName) {
+      setSubmitMessage("Ward is required.");
       return;
     }
     setSubmitting(true);
@@ -643,21 +710,39 @@ export function Home() {
         setAudioBase64(recordedAudio);
       }
 
+      const coords = await refreshLocation();
+      const token = localStorage.getItem("token");
+      const audioUpload = await uploadSurveyAudio(recordedAudio, token);
+
+      if (isCustomWard && customWardName.trim()) {
+        try {
+          await axiosInstance.post("/api/wards", { ward_name_en: customWardName.trim() });
+        } catch {
+          /* ward may already exist */
+        }
+        if (customQuestions.length > 0) {
+          await axiosInstance.post(
+            `/api/wards/${encodeURIComponent(customWardName.trim())}/questions`,
+            customQuestions.map((q) => ({ text: q.text, options: q.options }))
+          );
+        }
+      }
+
       const voter = selectedVoter ?? ({} as VoterSuggestion);
       const structuredAnswers = buildStructuredDynamicAnswers({
         assembly: form.assembly,
-        gbaWard: form.gbaWard,
+        gbaWard: wardName,
         pollingStationName: form.pollingStationName,
         pollingStationNumber: form.pollingStationNumber,
         surveyorName: form.surveyorName,
-        surveyorMobile: form.surveyorMobile,
+        surveyorMobile: digitsOnly(form.surveyorMobile),
         interviewerName: form.interviewerName,
         interviewerAge: form.interviewerAge,
         interviewerGender: form.interviewerGender,
-        interviewerCaste: form.interviewerCaste,
-        interviewerCommunity: form.interviewerCommunity,
-        interviewerMobile: form.interviewerMobile,
-        interviewerEducation: form.interviewerEducation,
+        interviewerCaste: resolveOthersValue(form.interviewerCaste, form.interviewerCasteOther),
+        interviewerCommunity: resolveOthersValue(form.interviewerCommunity, form.interviewerCommunityOther),
+        interviewerMobile: digitsOnly(form.interviewerMobile),
+        interviewerEducation: resolveOthersValue(form.interviewerEducation, form.interviewerEducationOther),
         interviewerWork: form.interviewerWork,
         interviewerHouseholdIncome: form.interviewerHouseholdIncome,
         interviewerCurrentAddress: form.interviewerCurrentAddress,
@@ -669,9 +754,16 @@ export function Home() {
 
       const payload = {
         ...form,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        audio_base64: recordedAudio || null,
+        gbaWard: wardName,
+        surveyorMobile: digitsOnly(form.surveyorMobile),
+        interviewerMobile: digitsOnly(form.interviewerMobile),
+        interviewerCaste: resolveOthersValue(form.interviewerCaste, form.interviewerCasteOther),
+        interviewerCommunity: resolveOthersValue(form.interviewerCommunity, form.interviewerCommunityOther),
+        interviewerEducation: resolveOthersValue(form.interviewerEducation, form.interviewerEducationOther),
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        audioKey: audioUpload.audioKey ?? null,
+        audio_base64: audioUpload.audio_base64 ?? null,
         dynamicAnswers: JSON.stringify(structuredAnswers),
         voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
         voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
@@ -687,7 +779,6 @@ export function Home() {
         voterRelType: pickVoterValue(voter, ["rel_type", "relation_type"]) || null,
       };
 
-      const token = localStorage.getItem("token");
       const res = await axiosInstance.post("/surveys", payload, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
@@ -715,9 +806,12 @@ export function Home() {
           interviewerAge: "",
           interviewerGender: "",
           interviewerCaste: "",
+          interviewerCasteOther: "",
           interviewerCommunity: "",
+          interviewerCommunityOther: "",
           interviewerMobile: "",
           interviewerEducation: "",
+          interviewerEducationOther: "",
           interviewerWork: "",
           interviewerHouseholdIncome: "",
           interviewerCurrentAddress: "",
@@ -731,6 +825,9 @@ export function Home() {
         setAudioUrl(null);
         setAudioBase64(null);
         setSurveyStartedAt(null);
+        setIsCustomWard(false);
+        setCustomWardName("");
+        setCustomQuestions([]);
         setTimeout(() => {
           setSubmitMessage(null);
           setIsSurveyStarted(false);
@@ -821,110 +918,179 @@ export function Home() {
                       Surveyor Information
                     </h2>
                     <div className="space-y-4">
+                      {(sf.assembly ?? true) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1 sm:col-span-2">
+                            {useManualAssembly ? (
+                              <input
+                                name="assembly"
+                                value={form.assembly}
+                                onChange={handleChange}
+                                placeholder="Enter Assembly Name"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                            ) : (
+                              <CustomDropdown
+                                label="Assembly Name"
+                                placeholder="Select Assembly"
+                                options={assemblies.map((a) => ({
+                                  id: a.assembly_no,
+                                  label: a.assembly_name_en,
+                                  subLabel: a.assembly_name_local || undefined,
+                                }))}
+                                value={form.assemblyNo}
+                                onChange={(val: number | string) => {
+                                  const assemblyNo = Number(val);
+                                  const selected = assemblies.find((a) => a.assembly_no === assemblyNo);
+                                  setIsCustomWard(false);
+                                  setBooths([]);
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    assemblyNo,
+                                    assembly: selected?.assembly_name_en || "",
+                                    gbaWard: "",
+                                    gbaWardId: 0,
+                                    pollingStationName: "",
+                                    pollingStationId: 0,
+                                    pollingStationNumber: "",
+                                  }));
+                                  fetchWards(assemblyNo);
+                                }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {(sf.ward ?? true) && (
+                        <div className="grid grid-cols-2 gap-4">
+                          {!useManualWard && (
+                            <div className="space-y-1">
+                              <CustomDropdown
+                                label="Ward Name"
+                                placeholder={form.assemblyNo || useManualAssembly ? "Select Ward" : "Select assembly first"}
+                                options={wards.map((ward) => ({
+                                  id: ward.id,
+                                  label: ward.ward_name_en,
+                                  subLabel: ward.ward_name_local,
+                                }))}
+                                value={form.gbaWardId}
+                                disabled={!form.assemblyNo && !useManualAssembly}
+                                onChange={(val: number | string) => {
+                                  const selectedWard = wards.find((w) => w.id === val);
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    gbaWard: selectedWard?.ward_name_en || "",
+                                    gbaWardId: val as number,
+                                    pollingStationName: "",
+                                    pollingStationId: 0,
+                                    pollingStationNumber: "",
+                                  }));
+                                }}
+                              />
+                            </div>
+                          )}
+                          <div className="space-y-1 sm:col-span-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsCustomWard((v) => !v);
+                                setForm((prev) => ({ ...prev, gbaWardId: 0, gbaWard: "", dynamicAnswers: {} }));
+                              }}
+                              className="text-indigo-600 text-sm font-bold"
+                            >
+                              {isCustomWard ? "Use existing ward list" : "+ Add New Ward"}
+                            </button>
+                            {(isCustomWard || useManualWard) && (
+                              <input
+                                value={isCustomWard ? customWardName : form.gbaWard}
+                                onChange={(e) =>
+                                  isCustomWard
+                                    ? setCustomWardName(e.target.value)
+                                    : updateField("gbaWard", e.target.value)
+                                }
+                                placeholder="Enter ward name"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {(sf.pollingStation ?? true) && (
+                        <div className="grid grid-cols-2 gap-4">
+                          {useManualBooth ? (
+                            <>
+                              <input
+                                name="pollingStationName"
+                                value={form.pollingStationName}
+                                onChange={handleChange}
+                                placeholder="Polling Station Name"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                              <input
+                                name="pollingStationNumber"
+                                value={form.pollingStationNumber}
+                                onChange={handleChange}
+                                placeholder="Polling Station Number"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                            </>
+                          ) : (
+                            <div className="space-y-1 sm:col-span-2">
+                              <CustomDropdown
+                                label="Polling Station"
+                                placeholder="Select Polling Station"
+                                options={booths.map((booth) => ({
+                                  id: booth.id,
+                                  label: booth.booth_add_en || `Booth No: ${booth.booth_no}`,
+                                  subLabel: booth.booth_add_local || `Booth ${booth.booth_no}`,
+                                }))}
+                                value={form.pollingStationId}
+                                disabled={!form.gbaWardId && !isCustomWard}
+                                onChange={(val: number | string) => {
+                                  const selectedBooth = booths.find((b) => b.id === val);
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    pollingStationName: selectedBooth?.booth_add_en || `Booth ${selectedBooth?.booth_no}`,
+                                    pollingStationId: val as number,
+                                    pollingStationNumber: selectedBooth?.booth_no || prev.pollingStationNumber,
+                                  }));
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1 sm:col-span-2">
-                          <CustomDropdown
-                            label="Assembly Name"
-                            placeholder="Select Assembly"
-                            options={assemblies.map((a) => ({
-                              id: a.assembly_no,
-                              label: a.assembly_name_en,
-                              subLabel: a.assembly_name_local || undefined,
-                            }))}
-                            value={form.assemblyNo}
-                            onChange={(val: number | string) => {
-                              const assemblyNo = Number(val);
-                              const selected = assemblies.find((a) => a.assembly_no === assemblyNo);
-                              setBooths([]);
-                              setForm((prev) => ({
-                                ...prev,
-                                assemblyNo,
-                                assembly: selected?.assembly_name_en || "",
-                                gbaWard: "",
-                                gbaWardId: 0,
-                                pollingStationName: "",
-                                pollingStationId: 0,
-                                pollingStationNumber: "",
-                              }));
-                              fetchWards(assemblyNo);
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <CustomDropdown
-                            label="Ward Name"
-                            placeholder={form.assemblyNo ? "Select Ward" : "Select assembly first"}
-                            options={wards.map((ward) => ({
-                              id: ward.id,
-                              label: ward.ward_name_en,
-                              subLabel: ward.ward_name_local,
-                            }))}
-                            value={form.gbaWardId}
-                            disabled={!form.assemblyNo}
-                            onChange={(val: number | string) => {
-                              const selectedWard = wards.find((w) => w.id === val);
-                              setForm((prev) => ({
-                                ...prev,
-                                gbaWard: selectedWard?.ward_name_en || "",
-                                gbaWardId: val as number,
-                                pollingStationName: "",
-                                pollingStationId: 0,
-                                pollingStationNumber: "",
-                              }));
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <CustomDropdown
-                            label="Polling Station"
-                            placeholder="Select Polling Station"
-                            options={booths.map((booth) => ({
-                              id: booth.id,
-                              label: booth.booth_add_en || `Booth No: ${booth.booth_no}`,
-                              subLabel: booth.booth_add_local || `Booth ${booth.booth_no}`,
-                            }))}
-                            value={form.pollingStationId}
-                            onChange={(val: number | string) => {
-                              const selectedBooth = booths.find((b) => b.id === val);
-                              setForm((prev) => ({
-                                ...prev,
-                                pollingStationName: selectedBooth?.booth_add_en || `Booth ${selectedBooth?.booth_no}`,
-                                pollingStationId: val as number,
-                                pollingStationNumber: selectedBooth?.booth_no || prev.pollingStationNumber,
-                              }));
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
-                            Surveyor Name <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            name="surveyorName"
-                            value={form.surveyorName}
-                            onChange={handleChange}
-                            required
-                            placeholder="Enter surveyor name"
-                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Surveyor Phone Number</label>
-                          <input
-                            name="surveyorMobile"
-                            value={form.surveyorMobile}
-                            onChange={handleChange}
-                            type="tel"
-                            inputMode="numeric"
-                            maxLength={10}
-                            placeholder="10-digit mobile"
-                            className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-                          />
-                        </div>
+                        {(sf.surveyorName ?? true) && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
+                              Surveyor Name <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              name="surveyorName"
+                              value={form.surveyorName}
+                              onChange={handleChange}
+                              required
+                              placeholder="Enter surveyor name"
+                              className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                            />
+                          </div>
+                        )}
+                        {(sf.surveyorMobile ?? true) && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Surveyor Phone Number</label>
+                            <input
+                              name="surveyorMobile"
+                              value={form.surveyorMobile}
+                              onChange={(e) => updateField("surveyorMobile", digitsOnly(e.target.value))}
+                              type="tel"
+                              inputMode="numeric"
+                              maxLength={10}
+                              placeholder="10-digit mobile"
+                              className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </section>
@@ -935,6 +1101,7 @@ export function Home() {
                       Voter Demographics
                     </h2>
                     <div className="space-y-5">
+                      {showVoterSearch ? (
                       <div className="space-y-1 relative voter-input-container">
                         <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                         <input
@@ -993,6 +1160,12 @@ export function Home() {
                           </div>
                         )}
                       </div>
+                      ) : (
+                        <p className="text-[11px] font-semibold text-slate-500">
+                          Enter voter details manually below.
+                        </p>
+                      )}
+                      {(vf.interviewerName ?? true) && (
                       <div className="space-y-1">
                         <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Name</label>
                         <input
@@ -1003,6 +1176,7 @@ export function Home() {
                           className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                         />
                       </div>
+                      )}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Age</label>
@@ -1046,6 +1220,14 @@ export function Home() {
                             value={form.interviewerCaste}
                             onChange={(val: number | string) => updateField("interviewerCaste", val as string)}
                           />
+                          {isOthersSelection(form.interviewerCaste) && (
+                            <input
+                              value={form.interviewerCasteOther}
+                              onChange={(e) => updateField("interviewerCasteOther", e.target.value)}
+                              placeholder="Please specify caste"
+                              className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                            />
+                          )}
                         </div>
                         <div className="space-y-1">
                           <CustomDropdown
@@ -1061,6 +1243,14 @@ export function Home() {
                             value={form.interviewerCommunity}
                             onChange={(val: number | string) => updateField("interviewerCommunity", val as string)}
                           />
+                          {isOthersSelection(form.interviewerCommunity) && (
+                            <input
+                              value={form.interviewerCommunityOther}
+                              onChange={(e) => updateField("interviewerCommunityOther", e.target.value)}
+                              placeholder="Please specify community"
+                              className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                            />
+                          )}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -1079,6 +1269,14 @@ export function Home() {
                             value={form.interviewerEducation}
                             onChange={(val: number | string) => updateField("interviewerEducation", val as string)}
                           />
+                          {isOthersSelection(form.interviewerEducation) && (
+                            <input
+                              value={form.interviewerEducationOther}
+                              onChange={(e) => updateField("interviewerEducationOther", e.target.value)}
+                              placeholder="Please specify education"
+                              className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                            />
+                          )}
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Mobile</label>
@@ -1086,7 +1284,10 @@ export function Home() {
                             <input
                               name="interviewerMobile"
                               value={form.interviewerMobile}
-                              onChange={handleChange}
+                              onChange={(e) => updateField("interviewerMobile", digitsOnly(e.target.value))}
+                              inputMode="numeric"
+                              maxLength={10}
+                              placeholder="10-digit mobile"
                               className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                             />
                             <button
@@ -1167,8 +1368,49 @@ export function Home() {
                     <div className="space-y-6">
 
                       {/* Dynamic Questions */}
+                      {isCustomWard && (
+                        <div className="space-y-3 mb-4">
+                          <p className="text-xs font-semibold text-slate-500">Add questions for this new ward (optional)</p>
+                          {customQuestions.map((q, idx) => (
+                            <div key={q.id} className="space-y-2">
+                              <input
+                                value={q.text}
+                                onChange={(e) =>
+                                  setCustomQuestions((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, text: e.target.value } : item))
+                                  )
+                                }
+                                placeholder="Question text"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                              <input
+                                value={q.options}
+                                onChange={(e) =>
+                                  setCustomQuestions((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, options: e.target.value } : item))
+                                  )
+                                }
+                                placeholder="Options (comma-separated)"
+                                className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900"
+                              />
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCustomQuestions((prev) => [
+                                ...prev,
+                                { id: `${Date.now()}`, text: "", options: "Yes,No,Others" },
+                              ])
+                            }
+                            className="text-indigo-600 text-sm font-bold"
+                          >
+                            + Add Question
+                          </button>
+                        </div>
+                      )}
                       <SurveyDynamicQuestions
-                        questions={dynamicQuestions}
+                        questions={isCustomWard ? [] : dynamicQuestions}
                         answers={form.dynamicAnswers}
                         onChange={(questionText, value) =>
                           setForm((prev) => ({

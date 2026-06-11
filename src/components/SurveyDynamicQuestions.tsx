@@ -163,28 +163,39 @@ export default function SurveyDynamicQuestions({
                   onChange={onChange}
                 />
               ) : (
-                <div
-                  className="survey-question-options-grid"
-                  role="radiogroup"
-                  aria-label={question.text}
-                >
-                  {config.options.map((option) => {
-                    const selected = answers[answerKey] === option;
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        name={groupName}
-                        aria-checked={selected}
-                        role="radio"
-                        onClick={() => onChange(answerKey, option)}
-                        className={`survey-option-chip${selected ? " is-selected" : ""}`}
-                      >
-                        {option}
-                      </button>
-                    );
-                  })}
-                </div>
+                <>
+                  <div
+                    className="survey-question-options-grid"
+                    role="radiogroup"
+                    aria-label={question.text}
+                  >
+                    {config.options.map((option) => {
+                      const selected = answers[answerKey] === option;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          name={groupName}
+                          aria-checked={selected}
+                          role="radio"
+                          onClick={() => onChange(answerKey, option)}
+                          className={`survey-option-chip${selected ? " is-selected" : ""}`}
+                        >
+                          {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(answers[answerKey] === "Others" || answers[answerKey] === "Other") && (
+                    <input
+                      type="text"
+                      value={answers[`${answerKey}__other`] || ""}
+                      onChange={(e) => onChange(`${answerKey}__other`, e.target.value)}
+                      placeholder="Please specify"
+                      className="survey-text-field-input mt-2"
+                    />
+                  )}
+                </>
               )}
             </div>
           );

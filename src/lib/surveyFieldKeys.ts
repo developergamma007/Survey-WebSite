@@ -180,9 +180,24 @@ export type FormPayloadInput = {
   surveyEndedAt?: string | null;
 };
 
+function resolveOthersInAnswers(answers: Record<string, string>): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    if (!value || key.endsWith("__other")) continue;
+    if (value === "Others" || value === "Other") {
+      const other = (answers[`${key}__other`] || "").trim();
+      resolved[key] = other ? `Others: ${other}` : value;
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+}
+
 export function buildStructuredDynamicAnswers(input: FormPayloadInput): Record<string, string> {
   const merged: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input.dynamicAnswers)) {
+  const resolvedAnswers = resolveOthersInAnswers(input.dynamicAnswers);
+  for (const [key, value] of Object.entries(resolvedAnswers)) {
     if (!value) continue;
     const stored = value.includes("__rows") ? compactStoredTextAnswer(value) : value;
     if (stored) merged[key] = stored;

@@ -77,7 +77,9 @@ export default function LoginPage() {
           : lastDetail,
       );
     } catch {
-      setError(`Cannot reach the API at ${API_BASE_URL}. Start Survey backend (port 8002) and restart Next.js.`);
+      setError(
+        `Cannot reach the API at ${API_BASE_URL || window.location.origin}. Check that Survey-Backend is running and API env is configured.`
+      );
     } finally {
       setLoading(false);
     }

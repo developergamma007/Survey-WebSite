@@ -1,14 +1,42 @@
 /**
  * Frontend App Configuration
  *
- * API_BASE_URL is read from the environment variable NEXT_PUBLIC_API_BASE_URL.
+ * Local dev: set NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8002 in .env.local
  *
- * Environment files (Next.js auto-loads these):
- *   .env.local        → Local development (git-ignored)
- *   .env.development  → Development defaults
- *   .env.production   → Production defaults
+ * Production: leave NEXT_PUBLIC_API_BASE_URL empty (or unset). The app uses
+ * same-origin requests and Next.js rewrites proxy to API_BACKEND_URL
+ * (default http://127.0.0.1:8000 on the server).
  *
- * NOTE: All Next.js public env vars must be prefixed with NEXT_PUBLIC_
+ * If a production build was accidentally baked with localhost in
+ * NEXT_PUBLIC_API_BASE_URL, the browser guard below ignores it on real domains.
  */
 
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api").replace(/\/$/, "");
+const LOCAL_DEV_API = "http://127.0.0.1:8002";
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function isLocalApiUrl(url: string): boolean {
+  return /^(https?:\/\/)?(127\.0\.0\.1|localhost)(:\d+)?\/?$/i.test(url);
+}
+
+export function getApiBaseUrl(): string {
+  const fromEnv = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim().replace(/\/$/, "");
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocal = isLocalHostname(host);
+
+    if (!isLocal && fromEnv && isLocalApiUrl(fromEnv)) {
+      return "";
+    }
+
+    if (fromEnv) return fromEnv;
+    return isLocal ? LOCAL_DEV_API : "";
+  }
+
+  return fromEnv;
+}
+
+export const API_BASE_URL = getApiBaseUrl();

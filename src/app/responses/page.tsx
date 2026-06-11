@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2 } from "lucide-react";
 import AnalyticsCharts from "./AnalyticsCharts";
 import WardManagementTab from "./WardManagementTab";
+import FormFieldsConfigTab from "./FormFieldsConfigTab";
 import FieldRecordsTable from "./FieldRecordsTable";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -20,7 +21,7 @@ export default function ResponsesPage() {
     const [responses, setResponses] = useState<SurveyResponseRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'analytics' | 'list' | 'questions'>('analytics');
+    const [activeTab, setActiveTab] = useState<'analytics' | 'list' | 'questions' | 'fields'>('analytics');
     const router = useRouter();
 
     useEffect(() => {
@@ -156,6 +157,15 @@ export default function ResponsesPage() {
                             <Settings2 className="h-3.5 w-3.5" />
                             Survey Flow
                         </button>
+                        <button
+                            role="tab"
+                            aria-selected={activeTab === 'fields'}
+                            onClick={() => setActiveTab('fields')}
+                            className={cn("ps-tab", activeTab === 'fields' && "is-active")}
+                        >
+                            <Settings2 className="h-3.5 w-3.5" />
+                            Form Fields
+                        </button>
                     </div>
 
                     <div className="ps-tab-panel">
@@ -171,8 +181,10 @@ export default function ResponsesPage() {
                                     <AnalyticsCharts data={responses} />
                                 ) : activeTab === 'list' ? (
                                     <FieldRecordsTable responses={responses} />
-                                ) : (
+                                ) : activeTab === 'questions' ? (
                                     <WardManagementTab responses={responses} />
+                                ) : (
+                                    <FormFieldsConfigTab />
                                 )}
                             </motion.div>
                         </AnimatePresence>
