@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Download, MapPin } from "lucide-react";
+import { Download, MapPin } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
 import { FieldRecordAudio } from "@/components/FieldRecordAudio";
+import WardFilterSelect from "./WardFilterSelect";
 import { hasSurveyAudio } from "@/lib/audioRecording";
 import {
   BASE_RECORD_COLUMNS,
@@ -47,7 +48,7 @@ const geotagCellStyle: CSSProperties = {
 
 function columnWidthStyle(key: string): CSSProperties | undefined {
   if (key === "id") return { width: 80 };
-  if (key === "audio") return { width: 72 };
+  if (key === "audio") return { width: 300 };
   if (key === "geotag") return { width: GEOTAG_COL_PX };
   return undefined;
 }
@@ -201,23 +202,11 @@ export default function FieldRecordsTable({ responses }: Props) {
       <div className="ps-field-records-toolbar">
         <div className="ps-field-records-toolbar-left">
           <span className="ps-field-records-label">Ward</span>
-          <div className="ps-field-records-select-wrap">
-            <select
-              id="ward-filter"
-              value={selectedWard}
-              onChange={(e) => setSelectedWard(e.target.value)}
-              className="ps-field-records-select"
-            >
-              <option value="">All Wards</option>
-              {wards.map((ward) => (
-                <option key={ward.id} value={ward.ward_name_en}>
-                  {ward.ward_name_en}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} className="ps-field-records-select-icon" aria-hidden />
-          </div>
-          <span className="ps-field-records-count">{filteredRows.length} records</span>
+          <WardFilterSelect
+            wards={wards}
+            value={selectedWard}
+            onChange={setSelectedWard}
+          />
           {loadingQuestions && selectedWard ? (
             <span className="ps-field-records-meta">Loading columns…</span>
           ) : null}

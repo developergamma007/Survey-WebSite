@@ -482,7 +482,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                 <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
                                 Voter Information
                             </h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                                 <div className="space-y-1 relative voter-input-container">
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Search Voter</label>
                                     <input
@@ -657,7 +657,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                                         <option value="Above 1,00,000">Above ₹1,00,000</option>
                                     </select>
                                 </div>
-                                <div className="space-y-1 sm:col-span-2">
+                                <div className="space-y-1 xl:col-span-2">
                                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Current Address</label>
                                     <input
                                         value={form.interviewerCurrentAddress}

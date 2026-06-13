@@ -24,6 +24,7 @@ export type SurveyResponseRow = {
   longitude: number | null;
   audio_url: string | null;
   has_audio?: boolean;
+  audio_link?: string | null;
   audio_base64?: string | null;
   dynamic_answers: string | null;
   created_at: string;
@@ -235,6 +236,12 @@ export function buildStructuredDynamicAnswers(input: FormPayloadInput): Record<s
   return merged;
 }
 
+export function getAudioExportLink(row: SurveyResponseRow): string {
+  if (row.audio_link?.trim()) return row.audio_link.trim();
+  if (row.audio_url?.startsWith("http")) return row.audio_url;
+  return "";
+}
+
 export function exportRecordsCsv(
   rows: SurveyResponseRow[],
   columns: RecordColumn[],
@@ -247,7 +254,11 @@ export function exportRecordsCsv(
       columns
         .map((col) => {
           if (col.key === "audio") {
-            return escapeCsv(row.has_audio || row.audio_url || row.audio_base64 ? "Recorded" : "Silent");
+            const link = getAudioExportLink(row);
+            if (link) return escapeCsv(link);
+            return escapeCsv(
+              row.has_audio || row.audio_url || row.audio_base64 ? "Recorded (no public link)" : "Silent"
+            );
           }
           return escapeCsv(getRecordCellValue(row, col.key, col.legacyKeys));
         })

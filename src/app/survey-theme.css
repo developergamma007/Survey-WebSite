@@ -546,6 +546,56 @@
   color: #f87171;
 }
 
+.survey-admin-signout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.625rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.survey-admin-signout-btn:hover {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.survey-field-readonly-wrap {
+  position: relative;
+}
+
+.survey-field-readonly {
+  cursor: not-allowed;
+  padding-right: 2.75rem !important;
+  background-color: #d4d8d5 !important;
+  border-color: #b8bfbb !important;
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.survey-field-readonly-label {
+  color: #94a3b8 !important;
+}
+
+.survey-field-readonly-icon {
+  position: absolute;
+  right: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.32;
+  filter: blur(0.75px);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
 /* Ward questions: outer section border removed — inner question card border only */
 .survey-section--flush {
   border: none;
@@ -557,6 +607,71 @@
 
 .survey-section--flush .survey-dynamic-title {
   margin-bottom: 0.75rem;
+}
+
+.survey-inline-login {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 2rem;
+}
+
+.survey-inline-login--wide {
+  max-width: 32rem;
+}
+
+.survey-inline-login-head {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.survey-inline-login-title {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 0.5rem;
+}
+
+.survey-inline-login-sub {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.survey-inline-login-btn {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  border: none;
+  box-shadow: 0 8px 20px rgba(5, 150, 105, 0.25);
+}
+
+.survey-inline-login-btn:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.survey-session-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 4rem 1rem;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.survey-session-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #059669;
+  animation: survey-spin 0.8s linear infinite;
+}
+
+@keyframes survey-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Mobile: reduce nested borders and padding so fields use full width */

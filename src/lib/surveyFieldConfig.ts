@@ -7,7 +7,6 @@ export type SurveyFieldConfig = {
 
 export const DEFAULT_SURVEY_FIELD_CONFIG: SurveyFieldConfig = {
   surveyorFields: {
-    assembly: true,
     ward: true,
     pollingStation: true,
     surveyorName: true,
@@ -41,7 +40,6 @@ export function mergeFieldConfig(raw: Partial<SurveyFieldConfig> | null | undefi
 }
 
 export const SURVEYOR_FIELD_LABELS: Record<string, string> = {
-  assembly: "Assembly",
   ward: "Ward",
   pollingStation: "Polling Station",
   surveyorName: "Surveyor Name",

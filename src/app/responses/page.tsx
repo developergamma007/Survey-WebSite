@@ -1,28 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2 } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2, Users } from "lucide-react";
 import AnalyticsCharts from "./AnalyticsCharts";
 import WardManagementTab from "./WardManagementTab";
 import FormFieldsConfigTab from "./FormFieldsConfigTab";
 import FieldRecordsTable from "./FieldRecordsTable";
+import UsersTab from "./UsersTab";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { API_BASE_URL } from "@/lib/config";
 import type { SurveyResponseRow } from "@/lib/surveyFieldKeys";
+import { clearSurveyorSession, fetchSurveyorProfile } from "@/lib/surveyorSession";
+import { isResponsesAdmin } from "@/lib/adminUsers";
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export default function ResponsesPage() {
+type AdminTab = "analytics" | "list" | "questions" | "fields" | "users";
+
+const VALID_TABS: AdminTab[] = ["analytics", "list", "questions", "fields", "users"];
+
+function parseTab(value: string | null): AdminTab {
+    if (value && VALID_TABS.includes(value as AdminTab)) {
+        return value as AdminTab;
+    }
+    return "analytics";
+}
+
+function ResponsesPageInner() {
     const [responses, setResponses] = useState<SurveyResponseRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'analytics' | 'list' | 'questions' | 'fields'>('analytics');
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const [activeTab, setActiveTab] = useState<AdminTab>(() => parseTab(searchParams.get("tab")));
+
+    useEffect(() => {
+        setActiveTab(parseTab(searchParams.get("tab")));
+    }, [searchParams]);
+
+    const changeTab = (tab: AdminTab) => {
+        setActiveTab(tab);
+        router.replace(`/responses?tab=${tab}`, { scroll: false });
+    };
 
     useEffect(() => {
         const token = localStorage.getItem("token");
@@ -33,14 +57,20 @@ export default function ResponsesPage() {
 
         const fetchResponses = async () => {
             try {
+                const profile = await fetchSurveyorProfile(token);
+                if (!isResponsesAdmin(profile.username)) {
+                    router.push("/login");
+                    return;
+                }
+
                 const res = await fetch(`${API_BASE_URL}/api/responses`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
                 });
 
-                if (res.status === 401) {
-                    localStorage.removeItem("token");
+                if (res.status === 401 || res.status === 403) {
+                    clearSurveyorSession();
                     router.push("/login");
                     return;
                 }
@@ -62,7 +92,7 @@ export default function ResponsesPage() {
     }, [router]);
 
     const handleLogout = () => {
-        localStorage.removeItem("token");
+        clearSurveyorSession();
         router.push("/login");
     };
 
@@ -133,7 +163,7 @@ export default function ResponsesPage() {
                         <button
                             role="tab"
                             aria-selected={activeTab === 'analytics'}
-                            onClick={() => setActiveTab('analytics')}
+                            onClick={() => changeTab("analytics")}
                             className={cn("ps-tab", activeTab === 'analytics' && "is-active")}
                         >
                             <LayoutDashboard className="h-3.5 w-3.5" />
@@ -142,7 +172,7 @@ export default function ResponsesPage() {
                         <button
                             role="tab"
                             aria-selected={activeTab === 'list'}
-                            onClick={() => setActiveTab('list')}
+                            onClick={() => changeTab("list")}
                             className={cn("ps-tab", activeTab === 'list' && "is-active")}
                         >
                             <List className="h-3.5 w-3.5" />
@@ -151,7 +181,7 @@ export default function ResponsesPage() {
                         <button
                             role="tab"
                             aria-selected={activeTab === 'questions'}
-                            onClick={() => setActiveTab('questions')}
+                            onClick={() => changeTab("questions")}
                             className={cn("ps-tab", activeTab === 'questions' && "is-active")}
                         >
                             <Settings2 className="h-3.5 w-3.5" />
@@ -160,11 +190,20 @@ export default function ResponsesPage() {
                         <button
                             role="tab"
                             aria-selected={activeTab === 'fields'}
-                            onClick={() => setActiveTab('fields')}
+                            onClick={() => changeTab("fields")}
                             className={cn("ps-tab", activeTab === 'fields' && "is-active")}
                         >
                             <Settings2 className="h-3.5 w-3.5" />
                             Form Fields
+                        </button>
+                        <button
+                            role="tab"
+                            aria-selected={activeTab === 'users'}
+                            onClick={() => changeTab("users")}
+                            className={cn("ps-tab", activeTab === 'users' && "is-active")}
+                        >
+                            <Users className="h-3.5 w-3.5" />
+                            Users
                         </button>
                     </div>
 
@@ -183,6 +222,8 @@ export default function ResponsesPage() {
                                     <FieldRecordsTable responses={responses} />
                                 ) : activeTab === 'questions' ? (
                                     <WardManagementTab responses={responses} />
+                                ) : activeTab === 'users' ? (
+                                    <UsersTab />
                                 ) : (
                                     <FormFieldsConfigTab />
                                 )}
@@ -192,6 +233,20 @@ export default function ResponsesPage() {
                 </div>
             </main>
         </div>
+    );
+}
+
+export default function ResponsesPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50/50">
+                    <div className="text-lg font-medium text-gray-600">Loading dashboard…</div>
+                </div>
+            }
+        >
+            <ResponsesPageInner />
+        </Suspense>
     );
 }
 

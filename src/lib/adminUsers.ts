@@ -1,7 +1,11 @@
-const BLOCKED_SUBMITTER_USERNAMES = new Set(["admin", "admin@iswot.io"]);
+const RESPONSES_ADMIN_USERNAME = "admin@iswot.io";
 
-export function isAdminSubmitter(username: string | null | undefined): boolean {
+export function isResponsesAdmin(username: string | null | undefined): boolean {
   if (!username) return false;
-  const normalized = username.trim().toLowerCase();
-  return BLOCKED_SUBMITTER_USERNAMES.has(normalized) || normalized.startsWith("admin@iswot");
+  return username.trim().toLowerCase() === RESPONSES_ADMIN_USERNAME;
+}
+
+/** Legacy alias — only admin@iswot.io may use the responses dashboard / not submit surveys. */
+export function isAdminSubmitter(username: string | null | undefined): boolean {
+  return isResponsesAdmin(username);
 }
