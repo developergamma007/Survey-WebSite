@@ -382,7 +382,7 @@
 
 .survey-question-options-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 0.5rem;
 }
 
@@ -392,12 +392,13 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  min-height: 2.5rem;
-  padding: 0.5rem 0.625rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.875rem;
   border: 1px solid #e2e8f0;
   border-radius: 0.5rem;
   background: #ffffff;
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.35;
   text-align: left;
@@ -543,4 +544,53 @@
 
 .survey-card button.survey-logout-btn:hover {
   color: #f87171;
+}
+
+/* Ward questions: outer section border removed — inner question card border only */
+.survey-section--flush {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+
+.survey-section--flush .survey-dynamic-title {
+  margin-bottom: 0.75rem;
+}
+
+/* Mobile: reduce nested borders and padding so fields use full width */
+@media (max-width: 639px) {
+  .survey-page {
+    padding: 0.25rem 0;
+    background-color: #f1f5f9;
+    background-image: none;
+  }
+
+  .survey-card {
+    max-width: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .survey-body {
+    padding: 0.75rem 0.625rem 1.25rem;
+  }
+
+  .survey-section {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 0 0 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .survey-section-title {
+    margin-bottom: 0.875rem;
+  }
+
+  .survey-question-field {
+    padding: 0.75rem 0.625rem;
+  }
 }

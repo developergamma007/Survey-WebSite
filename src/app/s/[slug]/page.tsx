@@ -690,7 +690,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
                         {/* Dynamic Questions */}
                         {questions.length > 0 && (
-                            <section className="survey-section">
+                            <section className="survey-section survey-section--flush">
                                 <SurveyDynamicQuestions
                                     questions={questions}
                                     answers={dynamicAnswers}

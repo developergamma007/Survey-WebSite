@@ -777,7 +777,7 @@ export function Home() {
   };
 
   return (
-    <div className="survey-page px-4 sm:px-6 lg:px-8">
+    <div className="survey-page px-2 sm:px-6 lg:px-8">
       <div className="survey-card">
         <div className="survey-header flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="text-center sm:text-left">
@@ -1290,7 +1290,7 @@ export function Home() {
 
                 {/* Right Column: Dynamic Info */}
                 <div className="space-y-8">
-                  <section className="survey-section h-full">
+                  <section className="survey-section survey-section--flush h-full">
                     <div className="space-y-6">
 
                       {/* Dynamic Questions */}
