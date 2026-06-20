@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Lock, LogIn, Mail, Phone, Shield, User } from "lucide-react";
+import { Download, Eye, EyeOff, Lock, LogIn, Mail, Phone, Shield, User } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
 import { buildUsernameCandidates, requestSurveyorLogin, requestSurveyorToken } from "@/lib/surveyorAuth";
 import {
@@ -36,6 +36,9 @@ export default function PulseSyncLoginScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [apkDownloading, setApkDownloading] = useState(false);
+  const [apkProgress, setApkProgress] = useState(0);
+  const [apkStatus, setApkStatus] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => {
     if (loading) return false;
@@ -105,6 +108,57 @@ export default function PulseSyncLoginScreen({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApkDownload = () => {
+    if (apkDownloading) return;
+    const apkUrls = ["/downloads/survey-mobile.apk"];
+    setApkDownloading(true);
+    setApkProgress(0);
+    setApkStatus("Checking Survey Mobile APK...");
+
+    const tryDownload = (urlIndex = 0) => {
+      const apkUrl = apkUrls[urlIndex];
+      if (!apkUrl) {
+        setApkStatus("APK file is not uploaded yet. Add it as public/downloads/survey-mobile.apk and redeploy.");
+        setApkDownloading(false);
+        return;
+      }
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", apkUrl, true);
+      xhr.responseType = "blob";
+      xhr.onprogress = (event) => {
+        if (!event.lengthComputable) {
+          setApkStatus("Downloading APK...");
+          return;
+        }
+        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+        setApkProgress(percent);
+        setApkStatus(`Downloading APK: ${percent}%`);
+      };
+      xhr.onload = () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          tryDownload(urlIndex + 1);
+          return;
+        }
+        const blobUrl = URL.createObjectURL(xhr.response);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = "survey-mobile.apk";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+        setApkProgress(100);
+        setApkStatus("Download complete. Open the APK on Android to install.");
+        setApkDownloading(false);
+      };
+      xhr.onerror = () => tryDownload(urlIndex + 1);
+      xhr.send();
+    };
+
+    tryDownload();
   };
 
   const tagline = isSurveyor ? "Field Survey Sign In" : "Admin Console Sign In";
@@ -287,6 +341,36 @@ export default function PulseSyncLoginScreen({
                 {loading ? "Signing in..." : "Sign in"}
               </button>
             </form>
+          </div>
+          <div className="ps-login-apk-card mt-5 rounded-2xl border border-white/15 bg-white/10 p-4 text-white shadow-2xl shadow-black/20 backdrop-blur">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black">Survey Mobile App</p>
+                <p className="mt-1 text-xs font-semibold text-slate-300">
+                  Download the Android APK for field survey testing.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleApkDownload}
+                disabled={apkDownloading}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/35 bg-emerald-400/15 px-4 py-2 text-xs font-black uppercase tracking-wider text-emerald-100 transition hover:bg-emerald-400/25 disabled:cursor-wait disabled:opacity-70"
+              >
+                <Download className="h-4 w-4" />
+                {apkDownloading ? `${apkProgress}%` : "Download APK"}
+              </button>
+            </div>
+            {(apkDownloading || apkStatus) ? (
+              <div className="mt-3">
+                <div className="h-2 overflow-hidden rounded-full bg-white/15">
+                  <span
+                    className="block h-full rounded-full bg-gradient-to-r from-emerald-300 to-teal-400 transition-all"
+                    style={{ width: `${apkProgress}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs font-semibold text-slate-300">{apkStatus}</p>
+              </div>
+            ) : null}
           </div>
         </motion.div>
       </div>

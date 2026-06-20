@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { fetchSurveyAudioUrl, hasSurveyAudio } from "@/lib/audioRecording";
+import { claimFieldAudioPlayback, releaseFieldAudioPlayback } from "@/lib/fieldAudioSession";
 
 type Props = {
   surveyId: number;
@@ -60,9 +61,19 @@ export function FieldRecordAudio({ surveyId, hasAudio }: Props) {
     const onEnded = () => {
       setPlaying(false);
       setCurrent(0);
+      releaseFieldAudioPlayback(surveyId);
     };
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+    const onPlay = () => {
+      claimFieldAudioPlayback(surveyId, () => {
+        audio.pause();
+        setPlaying(false);
+      });
+      setPlaying(true);
+    };
+    const onPause = () => {
+      setPlaying(false);
+      releaseFieldAudioPlayback(surveyId);
+    };
 
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onMeta);
@@ -79,7 +90,13 @@ export function FieldRecordAudio({ surveyId, hasAudio }: Props) {
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
     };
-  }, [src]);
+  }, [src, surveyId]);
+
+  useEffect(() => {
+    return () => {
+      releaseFieldAudioPlayback(surveyId);
+    };
+  }, [surveyId]);
 
   const seekFromClientX = useCallback((clientX: number) => {
     const audio = audioRef.current;
@@ -122,11 +139,17 @@ export function FieldRecordAudio({ surveyId, hasAudio }: Props) {
     try {
       if (playing) {
         audio.pause();
+        releaseFieldAudioPlayback(surveyId);
       } else {
+        claimFieldAudioPlayback(surveyId, () => {
+          audio.pause();
+          setPlaying(false);
+        });
         await audio.play();
       }
     } catch {
       setError(true);
+      releaseFieldAudioPlayback(surveyId);
     }
   };
 

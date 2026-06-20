@@ -400,7 +400,7 @@ export function Home() {
       recordingLimitRef.current = setTimeout(() => {
         if (!isSurveyStartedRef.current) return;
         stopRecording();
-        setSubmitMessage("Audio recording stopped at 5 minutes. Only the first 5 minutes are saved.");
+        setSubmitMessage("Audio recording stopped at 3 minutes. Only the first 3 minutes are saved.");
       }, MAX_SURVEY_AUDIO_MS);
     } catch (error) {
       console.error("Error starting audio recording:", error);
@@ -770,6 +770,8 @@ export function Home() {
         } else {
           setSubmitMessage(`Error: ${detail || error.message}`);
         }
+      } else if (error instanceof Error) {
+        setSubmitMessage(`Error: ${error.message}`);
       } else {
         setSubmitMessage("Error connecting to the server.");
       }

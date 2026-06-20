@@ -37,6 +37,9 @@ export async function uploadSurveyAudio(
     );
     return { audioKey: res.data.audioKey };
   } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 413) {
+      throw new Error("Audio upload is too large for the server. Please submit again with a shorter recording or increase the backend upload limit.");
+    }
     if (axios.isAxiosError(error) && error.response?.status === 503) {
       return { audio_base64: recordedAudio };
     }
