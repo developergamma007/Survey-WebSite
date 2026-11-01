@@ -54,6 +54,13 @@ function toApiQuestion(question: EditorQuestion) {
 interface Ward {
     id: number;
     ward_name_en: string;
+    assembly_no: number | null;
+}
+
+interface Assembly {
+    assembly_no: number;
+    assembly_name_en: string | null;
+    assembly_name_local: string | null;
 }
 
 type SurveyResponseRow = {
@@ -106,29 +113,82 @@ function exportResponsesCsv(rows: SurveyResponseRow[], wardName?: string) {
 }
 
 export default function WardManagementTab({ responses = [] }: Props) {
+    const [assemblies, setAssemblies] = useState<Assembly[]>([]);
+    const [selectedAssemblyNo, setSelectedAssemblyNo] = useState<number | null>(null);
+    const [isCreatingAssembly, setIsCreatingAssembly] = useState(false);
     const [wards, setWards] = useState<Ward[]>([]);
     const [selectedWard, setSelectedWard] = useState<Ward | null>(null);
     const [questions, setQuestions] = useState<EditorQuestion[]>([]);
     const [newWardName, setNewWardName] = useState("");
+    const [newAssemblyNo, setNewAssemblyNo] = useState("");
+    const [newAssemblyName, setNewAssemblyName] = useState("");
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [copiedWardName, setCopiedWardName] = useState<string | null>(null);
 
     useEffect(() => {
-        fetchWards();
+        fetchAssemblies();
     }, []);
 
-    const fetchWards = async () => {
+    const fetchAssemblies = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/wards`);
+            const res = await fetch(`${API_BASE_URL}/api/assemblies`);
             const data = await res.json();
             if (res.ok && Array.isArray(data)) {
-                setWards(data);
+                setAssemblies(data);
             } else {
-                setWards([]);
+                setAssemblies([]);
             }
         } catch (err) {
+            console.error("Failed to fetch assemblies", err);
+        }
+    };
+
+    const fetchWards = async (assemblyNo: number) => {
+        try {
+            const res = await fetch(API_BASE_URL + "/api/wards?assembly_no=" + assemblyNo);
+            const data = await res.json();
+            setWards(res.ok && Array.isArray(data) ? data : []);
+        } catch (err) {
             console.error("Failed to fetch wards", err);
+            setWards([]);
+        }
+    };
+
+    const selectAssembly = (assemblyNo: number) => {
+        setSelectedAssemblyNo(assemblyNo);
+        setSelectedWard(null);
+        setQuestions([]);
+        setMessage(null);
+        void fetchWards(assemblyNo);
+    };
+
+    const createAssembly = async () => {
+        const assemblyNo = Number(newAssemblyNo);
+        const assemblyName = newAssemblyName.trim();
+        if (!Number.isInteger(assemblyNo) || assemblyNo <= 0 || !assemblyName) {
+            setMessage("Enter a valid assembly number and assembly name.");
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/assemblies`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ assembly_no: assemblyNo, assembly_name_en: assemblyName }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Could not create assembly.");
+            setNewAssemblyNo("");
+            setNewAssemblyName("");
+            await fetchAssemblies();
+            setIsCreatingAssembly(false);
+            selectAssembly(assemblyNo);
+            setMessage("Assembly created. You can now create its wards.");
+        } catch (err) {
+            setMessage(err instanceof Error ? err.message : "Could not create assembly.");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -150,19 +210,27 @@ export default function WardManagementTab({ responses = [] }: Props) {
     };
 
     const createWard = async () => {
-        if (!newWardName) return;
+        if (!newWardName.trim() || selectedAssemblyNo === null) {
+            setMessage("Select an assembly before creating a ward.");
+            return;
+        }
         try {
             const res = await fetch(`${API_BASE_URL}/api/wards`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ward_name_en: newWardName }),
+                body: JSON.stringify({ ward_name_en: newWardName.trim(), assembly_no: selectedAssemblyNo }),
             });
             if (res.ok) {
                 setNewWardName("");
-                fetchWards();
+                fetchWards(selectedAssemblyNo);
+                setMessage("Ward created successfully.");
+            } else {
+                const data = await res.json();
+                setMessage(data.detail || "Could not create ward.");
             }
         } catch (err) {
             console.error("Failed to create ward", err);
+            setMessage("Could not create ward.");
         }
     };
 
@@ -279,10 +347,83 @@ export default function WardManagementTab({ responses = [] }: Props) {
                 <div className="bg-white rounded-xl p-3 border border-slate-200/80">
                     <h2 className="text-[11px] font-semibold text-slate-800 mb-2 flex items-center gap-1.5 tracking-tight">
                         <ListPlus className="text-indigo-500" size={14} />
-                        Wards
+                        Assembly & Wards
                     </h2>
 
-                    <div className="space-y-1 mb-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1 custom-scrollbar">
+                    <div className="space-y-2 border-b border-slate-100 pb-3">
+                        <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Select existing assembly</label>
+                        <select
+                            value={isCreatingAssembly ? "create" : selectedAssemblyNo ?? ""}
+                            onChange={(event) => {
+                                const selection = event.target.value;
+                                if (selection === "create") {
+                                    setIsCreatingAssembly(true);
+                                    setSelectedAssemblyNo(null);
+                                    setSelectedWard(null);
+                                    setWards([]);
+                                    setQuestions([]);
+                                    setMessage(null);
+                                    return;
+                                }
+                                const value = Number(selection);
+                                if (value) {
+                                    setIsCreatingAssembly(false);
+                                    selectAssembly(value);
+                                } else {
+                                    setIsCreatingAssembly(false);
+                                    setSelectedAssemblyNo(null);
+                                    setSelectedWard(null);
+                                    setWards([]);
+                                    setQuestions([]);
+                                }
+                            }}
+                            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10"
+                        >
+                            <option value="">Choose assembly</option>
+                            {assemblies.map((assembly) => (
+                                <option key={assembly.assembly_no} value={assembly.assembly_no}>
+                                    {assembly.assembly_name_en || `Assembly ${assembly.assembly_no}`} ({assembly.assembly_no})
+                                </option>
+                            ))}
+                            <option value="create">Other - Create new assembly</option>
+                        </select>
+
+                        {isCreatingAssembly && (
+                            <>
+                                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                                    <input
+                                        inputMode="numeric"
+                                        placeholder="No."
+                                        value={newAssemblyNo}
+                                        onChange={(event) => setNewAssemblyNo(event.target.value)}
+                                        className="rounded-md border border-slate-200 px-2 py-1.5 text-xs font-medium outline-none focus:border-indigo-500"
+                                    />
+                                    <input
+                                        placeholder="New assembly name"
+                                        value={newAssemblyName}
+                                        onChange={(event) => setNewAssemblyName(event.target.value)}
+                                        className="col-span-2 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-medium outline-none focus:border-indigo-500"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={createAssembly}
+                                    disabled={loading}
+                                    className="w-full rounded-md border border-indigo-200 bg-indigo-50 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                                >
+                                    Create Assembly
+                                </button>
+                            </>
+                        )}
+                        {message && !selectedWard && (
+                            <p className="text-[11px] font-medium text-emerald-600">{message}</p>
+                        )}
+                    </div>
+
+                    <div className="space-y-1 my-3 max-h-[calc(100vh-410px)] overflow-y-auto pr-1 custom-scrollbar">
+                        {selectedAssemblyNo === null && (
+                            <p className="px-2 py-4 text-center text-xs text-slate-500">Choose or create an assembly to view its wards.</p>
+                        )}
                         {wards.map((ward) => (
                             <div
                                 key={ward.id}
@@ -330,10 +471,12 @@ export default function WardManagementTab({ responses = [] }: Props) {
                                 className="w-full px-2.5 py-1.5 rounded-md border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                             />
                             <button
+                                type="button"
                                 onClick={createWard}
-                                className="w-full py-1.5 bg-slate-900 text-white rounded-md font-semibold text-xs hover:bg-black transition-all"
+                                disabled={selectedAssemblyNo === null || loading}
+                                className="w-full py-1.5 bg-slate-900 text-white rounded-md font-semibold text-xs hover:bg-black transition-all disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                                Create Ward
+                                {selectedAssemblyNo === null ? "Select Assembly First" : "Create Ward"}
                             </button>
                         </div>
                     </div>

@@ -33,6 +33,7 @@ import {
 } from "@/lib/voterSearch";
 import {
   clearSurveyorSession,
+  fetchMySurveyEntryCount,
   getStoredToken,
   isSurveyorAccount,
   restoreSurveyorSession,
@@ -125,6 +126,7 @@ export function Home() {
   const [username, setUsername] = useState<string | null>(null);
   const [surveyorProfile, setSurveyorProfile] = useState<SurveyorProfile | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [mySurveyEntryCount, setMySurveyEntryCount] = useState<number | null>(null);
   const [form, setForm] = useState<SurveyFormState>({
     assembly: "",
     assemblyNo: 0,
@@ -290,6 +292,19 @@ export function Home() {
 
   const isSurveyorLoggedIn = !!username && isSurveyorAccount(surveyorProfile);
 
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token || !isSurveyorAccount(surveyorProfile)) {
+      setMySurveyEntryCount(null);
+      return;
+    }
+    let active = true;
+    fetchMySurveyEntryCount(token)
+      .then((count) => { if (active) setMySurveyEntryCount(count); })
+      .catch(() => { if (active) setMySurveyEntryCount(null); });
+    return () => { active = false; };
+  }, [surveyorProfile?.username]);
+
   const handleLogout = () => {
     clearSurveyorSession();
     setUsername(null);
@@ -400,7 +415,7 @@ export function Home() {
       recordingLimitRef.current = setTimeout(() => {
         if (!isSurveyStartedRef.current) return;
         stopRecording();
-        setSubmitMessage("Audio recording stopped at 3 minutes. Only the first 3 minutes are saved.");
+        setSubmitMessage("Audio recording stopped after the 30-minute limit.");
       }, MAX_SURVEY_AUDIO_MS);
     } catch (error) {
       console.error("Error starting audio recording:", error);
@@ -469,12 +484,12 @@ export function Home() {
 
   const captureLocation = () => {
     if (!("geolocation" in navigator)) {
-      setSubmitMessage("Geolocation not supported. Survey will continue without GPS data.");
+      setSubmitMessage("Location is required. This device does not support GPS.");
       return;
     }
 
     if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-      setSubmitMessage("Location unavailable: use HTTPS (or localhost) to allow GPS.");
+      setSubmitMessage("Location is required. Use HTTPS (or localhost) to allow GPS.");
       return;
     }
 
@@ -490,7 +505,7 @@ export function Home() {
       onSuccess,
       (error) => {
         if (error.code === 1) {
-          setSubmitMessage("Location permission denied. Survey will continue without GPS data.");
+          setSubmitMessage("Location permission denied. Allow GPS access to submit this survey.");
           return;
         }
 
@@ -511,7 +526,7 @@ export function Home() {
                 setLocation(approx);
                 // setSubmitMessage("GPS unavailable; using approximate network location.");
               } else {
-                setSubmitMessage(`Location unavailable (${fallbackError.code}: ${reason}). Survey will continue without GPS data.`);
+                setSubmitMessage(`Location is required (${fallbackError.code}: ${reason}). Allow GPS access and try again.`);
               }
             })();
           },
@@ -642,6 +657,17 @@ export function Home() {
       setSubmitMessage("Ward is required. Open your ward survey link to continue.");
       return;
     }
+    const coords = await refreshLocation();
+    if (
+      coords.latitude === null ||
+      coords.longitude === null ||
+      !Number.isFinite(coords.latitude) ||
+      !Number.isFinite(coords.longitude)
+    ) {
+      setSubmitMessage("Current GPS location is required before submitting. Enable location access and try again.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -655,7 +681,6 @@ export function Home() {
         setAudioBase64(recordedAudio);
       }
 
-      const coords = await refreshLocation();
       const token = getStoredToken();
       const audioUpload = await uploadSurveyAudio(recordedAudio, token);
 
@@ -716,6 +741,7 @@ export function Home() {
 
       if (res.status === 200) {
         setSubmitMessage("Survey submitted successfully!");
+        setMySurveyEntryCount((count) => count === null ? count : count + 1);
         setVoterSearchQuery("");
         setVoterSearchAttempted(false);
         setVoterSuggestions([]);
@@ -866,7 +892,10 @@ export function Home() {
                   Start<br />Survey
                 </button>
               </div>
-              <p className="survey-hero-title">Ready to collect data?</p>
+              <p className="survey-entry-count">
+                Your completed survey entries: <span className="text-base font-black">{mySurveyEntryCount ?? "..."}</span>
+              </p>
+              <p className="survey-hero-title survey-entry-count-followup">Ready to collect data?</p>
               <p className="survey-hero-sub">Audio recording and GPS tracking will activate on start</p>
             </div>
           ) : (

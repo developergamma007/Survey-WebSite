@@ -5,6 +5,8 @@ import { Mic, MapPin, CheckCircle2, AlertCircle, Play, Square, Loader2 } from "l
 import { motion } from "framer-motion";
 import { API_BASE_URL } from "@/lib/config";
 import { finalizeMediaRecorder } from "@/lib/audioRecording";
+import { MAX_SURVEY_AUDIO_MS } from "@/lib/audioLimits";
+import { uploadSurveyAudio } from "@/lib/surveyAudioUpload";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
 import {
@@ -23,6 +25,12 @@ interface Question {
 interface Ward {
     id: number;
     ward_name_en: string;
+    assembly_no: number | null;
+}
+
+interface Assembly {
+    assembly_no: number;
+    assembly_name_en: string | null;
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -46,6 +54,7 @@ const highlightMatch = (value: string, query: string) => {
 export default function WardSurvey({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = use(params);
     const [ward, setWard] = useState<Ward | null>(null);
+    const [assemblyName, setAssemblyName] = useState<string | null>(null);
     const [questions, setQuestions] = useState<Question[]>([]);
     const [isSurveyStarted, setIsSurveyStarted] = useState(false);
     const [surveyStartedAt, setSurveyStartedAt] = useState<string | null>(null);
@@ -72,6 +81,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
     const audioChunksRef = useRef<BlobPart[]>([]);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const recordingLimitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [location, setLocation] = useState<{ latitude: number | null; longitude: number | null }>({ latitude: null, longitude: null });
     const [submitting, setSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState<string | null>(null);
@@ -89,15 +99,30 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         fetchWardData();
     }, [slug]);
 
+    useEffect(() => {
+        return () => {
+            if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+            if (mediaRecorderRef.current?.state === "recording") {
+                mediaRecorderRef.current.stop();
+            }
+        };
+    }, []);
+
     const fetchWardData = async () => {
         try {
-            const wardRes = await fetch(`${API_BASE_URL}/api/wards`);
+            const [wardRes, assemblyRes] = await Promise.all([
+                fetch(`${API_BASE_URL}/api/wards`),
+                fetch(`${API_BASE_URL}/api/assemblies`),
+            ]);
             const allWards: Ward[] = await wardRes.json();
+            const assemblies: Assembly[] = assemblyRes.ok ? await assemblyRes.json() : [];
             const decodedName = decodeURIComponent(slug);
             const currentWard = allWards.find(w => w.ward_name_en === decodedName);
 
             if (currentWard) {
                 setWard(currentWard);
+                const assembly = assemblies.find((item) => item.assembly_no === currentWard.assembly_no);
+                setAssemblyName(assembly?.assembly_name_en || null);
                 const qRes = await fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(currentWard.ward_name_en)}/questions`);
                 const qs = await qRes.json();
                 setQuestions(qs);
@@ -204,12 +229,21 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
             setMediaRecorder(recorder);
             mediaRecorderRef.current = recorder;
             setAudioRecording(true);
+            if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+            recordingLimitRef.current = setTimeout(() => {
+                stopRecording();
+                setSubmitMessage("Audio recording stopped after the 30-minute limit.");
+            }, MAX_SURVEY_AUDIO_MS);
         } catch {
             setSubmitMessage("Microphone access denied.");
         }
     };
 
     const stopRecording = () => {
+        if (recordingLimitRef.current) {
+            clearTimeout(recordingLimitRef.current);
+            recordingLimitRef.current = null;
+        }
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
             mediaRecorderRef.current.stop();
         }
@@ -324,6 +358,15 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (
+            location.latitude === null ||
+            location.longitude === null ||
+            !Number.isFinite(location.latitude) ||
+            !Number.isFinite(location.longitude)
+        ) {
+            setSubmitMessage("Current GPS location is required before submitting. Enable location access and try again.");
+            return;
+        }
         setSubmitting(true);
 
         try {
@@ -334,6 +377,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
             );
             setAudioRecording(false);
             if (recordedAudio) setAudioBase64(recordedAudio);
+            const audioUpload = await uploadSurveyAudio(recordedAudio);
 
             const voter = selectedVoter ?? ({} as VoterSuggestion);
             const structuredAnswers = buildStructuredDynamicAnswers({
@@ -371,7 +415,8 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                 dynamicAnswers: JSON.stringify(structuredAnswers),
                 latitude: location.latitude,
                 longitude: location.longitude,
-                audio_base64: recordedAudio,
+                audioKey: audioUpload.audioKey ?? null,
+                audio_base64: audioUpload.audio_base64 ?? null,
                 voterNameEn: pickVoterValue(voter, ["name_en"]) || form.interviewerName || null,
                 voterNameKannada: pickVoterValue(voter, ["name_kannada"]) || null,
                 voterGender: pickVoterValue(voter, ["gender"]) || form.interviewerGender || null,
@@ -443,6 +488,9 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
             <main className="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
                 <div className="bg-gray-900 p-8 text-center">
+                    {assemblyName && (
+                        <p className="text-indigo-200 text-xs uppercase tracking-[0.3em] font-bold mb-2">{assemblyName}</p>
+                    )}
                     <h1 className="text-3xl font-black text-white tracking-tight">{ward.ward_name_en}</h1>
                     <p className="text-gray-400 text-xs uppercase tracking-[0.3em] mt-3 font-bold">Field Intelligence Survey</p>
                 </div>

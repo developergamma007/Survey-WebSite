@@ -140,6 +140,22 @@
   line-height: 1.5;
 }
 
+/* Keep the personal progress count visually paired with Start Survey, not the helper copy below it. */
+.survey-entry-count {
+  margin: 0.25rem 0 0;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+  background: #ecfdf5;
+  padding: 0.5rem 1rem;
+  color: #047857;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.survey-entry-count-followup {
+  margin-top: 1.75rem;
+}
+
 .survey-footer {
   margin-top: 2rem;
   text-align: center;

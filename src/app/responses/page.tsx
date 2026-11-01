@@ -2,12 +2,13 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2, Users } from "lucide-react";
+import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2, Users, BarChart3 } from "lucide-react";
 import AnalyticsCharts from "./AnalyticsCharts";
 import WardManagementTab from "./WardManagementTab";
 import FormFieldsConfigTab from "./FormFieldsConfigTab";
 import FieldRecordsTable from "./FieldRecordsTable";
 import UsersTab from "./UsersTab";
+import VolunteerAnalysisTab from "./VolunteerAnalysisTab";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -20,9 +21,9 @@ function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-type AdminTab = "analytics" | "list" | "questions" | "fields" | "users";
+type AdminTab = "analytics" | "list" | "questions" | "fields" | "users" | "volunteer-analysis";
 
-const VALID_TABS: AdminTab[] = ["analytics", "list", "questions", "fields", "users"];
+const VALID_TABS: AdminTab[] = ["analytics", "list", "questions", "fields", "users", "volunteer-analysis"];
 
 function parseTab(value: string | null): AdminTab {
     if (value && VALID_TABS.includes(value as AdminTab)) {
@@ -205,6 +206,15 @@ function ResponsesPageInner() {
                             <Users className="h-3.5 w-3.5" />
                             Users
                         </button>
+                        <button
+                            role="tab"
+                            aria-selected={activeTab === 'volunteer-analysis'}
+                            onClick={() => changeTab("volunteer-analysis")}
+                            className={cn("ps-tab", activeTab === 'volunteer-analysis' && "is-active")}
+                        >
+                            <BarChart3 className="h-3.5 w-3.5" />
+                            Volunteer Analysis
+                        </button>
                     </div>
 
                     <div className="ps-tab-panel">
@@ -224,6 +234,8 @@ function ResponsesPageInner() {
                                     <WardManagementTab responses={responses} />
                                 ) : activeTab === 'users' ? (
                                     <UsersTab />
+                                ) : activeTab === 'volunteer-analysis' ? (
+                                    <VolunteerAnalysisTab responses={responses} />
                                 ) : (
                                     <FormFieldsConfigTab />
                                 )}

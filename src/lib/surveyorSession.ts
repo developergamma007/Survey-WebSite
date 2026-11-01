@@ -53,6 +53,16 @@ export async function fetchSurveyorProfile(token: string): Promise<SurveyorProfi
   return res.json() as Promise<SurveyorProfile>;
 }
 
+/** Completed survey submissions belonging to the authenticated field surveyor. */
+export async function fetchMySurveyEntryCount(token: string): Promise<number> {
+  const res = await fetch(`${API_BASE_URL}/api/my-survey-entry-count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("entry_count_fetch_failed");
+  const data = await res.json() as { entry_count?: number };
+  return Number.isFinite(data.entry_count) ? Number(data.entry_count) : 0;
+}
+
 export async function restoreSurveyorSession(): Promise<SurveyorProfile | null> {
   const token = getStoredToken();
   if (!token) return null;

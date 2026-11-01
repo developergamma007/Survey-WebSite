@@ -13,8 +13,9 @@ import {
     Pie,
     Cell,
 } from "recharts";
-import { Users, Vote, MapPin, Activity, ArrowUpRight, TrendingUp } from "lucide-react";
+import { Users, Vote, MapPin, Activity, ArrowUpRight, TrendingUp, SlidersHorizontal } from "lucide-react";
 import { motion } from "framer-motion";
+import { useMemo, useState } from "react";
 
 interface SurveyResponse {
     id: number;
@@ -47,6 +48,8 @@ interface SurveyResponse {
 }
 
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+const ALL_SCOPE = "all";
+const UNASSIGNED_SCOPE = "__unassigned__";
 
 const containerVariants = {
     hidden: { opacity: 0 },
@@ -67,9 +70,54 @@ const itemVariants = {
 };
 
 export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
+    const [selectedAssembly, setSelectedAssembly] = useState(ALL_SCOPE);
+    const [selectedWard, setSelectedWard] = useState(ALL_SCOPE);
+    const assemblies = useMemo(() => {
+        const values = Array.from(new Set(data.map((row) => row.assembly?.trim()).filter(Boolean))) as string[];
+        return values.sort();
+    }, [data]);
+    const unassignedAssemblyCount = useMemo(
+        () => data.filter((row) => !row.assembly?.trim()).length,
+        [data]
+    );
+    const assemblyScopedData = useMemo(
+        () => data.filter((row) =>
+            selectedAssembly === ALL_SCOPE ||
+            (selectedAssembly === UNASSIGNED_SCOPE
+                ? !row.assembly?.trim()
+                : row.assembly === selectedAssembly)
+        ),
+        [data, selectedAssembly]
+    );
+    const wards = useMemo(() => {
+        const values = assemblyScopedData
+            .map((row) => row.gba_ward?.trim())
+            .filter(Boolean);
+        return (Array.from(new Set(values)) as string[]).sort();
+    }, [assemblyScopedData]);
+    const unassignedWardCount = useMemo(
+        () => assemblyScopedData.filter((row) => !row.gba_ward?.trim()).length,
+        [assemblyScopedData]
+    );
+
+    const filteredData = useMemo(() => {
+        return assemblyScopedData.filter((row) =>
+            (selectedWard === ALL_SCOPE ||
+                (selectedWard === UNASSIGNED_SCOPE
+                    ? !row.gba_ward?.trim()
+                    : row.gba_ward === selectedWard))
+        );
+    }, [assemblyScopedData, selectedWard]);
+
+    const selectedScopeLabel = selectedWard !== ALL_SCOPE
+        ? selectedWard === UNASSIGNED_SCOPE ? "Unassigned Ward" : "Ward: " + selectedWard
+        : selectedAssembly !== ALL_SCOPE
+            ? selectedAssembly === UNASSIGNED_SCOPE ? "Unassigned Assembly" : "Assembly: " + selectedAssembly
+            : "All Assemblies";
+
     // --- Data Processing ---
     const partyCounts: Record<string, number> = {};
-    data.forEach((r) => {
+    filteredData.forEach((r) => {
         [r.q1, r.q2, r.q3, r.q4].forEach((party) => {
             if (party) {
                 partyCounts[party] = (partyCounts[party] || 0) + 1;
@@ -82,7 +130,7 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
     })).sort((a, b) => b.value - a.value);
 
     const genderCounts: Record<string, number> = {};
-    data.forEach((r) => {
+    filteredData.forEach((r) => {
         if (r.interviewer_gender) {
             const gender = r.interviewer_gender.toLowerCase();
             genderCounts[gender] = (genderCounts[gender] || 0) + 1;
@@ -93,9 +141,9 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
         value,
     }));
 
-    const totalResponses = data.length;
-    const uniqueWards = new Set(data.map((r) => r.gba_ward)).size;
-    const uniqueSurveyors = new Set(data.map((r) => r.surveyor_name)).size;
+    const totalResponses = filteredData.length;
+    const uniqueWards = new Set(filteredData.map((r) => r.gba_ward).filter(Boolean)).size;
+    const uniqueSurveyors = new Set(filteredData.map((r) => r.surveyor_name).filter(Boolean)).size;
     const topParty = partyData[0]?.name || "N/A";
 
     return (
@@ -105,6 +153,58 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
             animate="visible"
             className="w-full min-w-0 space-y-3"
         >
+            <motion.div variants={itemVariants} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                    <div className="rounded-md bg-indigo-50 p-1.5 text-indigo-600">
+                        <SlidersHorizontal className="h-4 w-4" />
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-slate-900">Insights scope</p>
+                        <p className="text-[10px] text-slate-500">Compare full assembly data or one ward.</p>
+                    </div>
+                </div>
+                <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+                    <label className="sr-only" htmlFor="analytics-assembly">Filter insights by assembly</label>
+                    <select
+                        id="analytics-assembly"
+                        value={selectedAssembly}
+                        onChange={(event) => {
+                            setSelectedAssembly(event.target.value);
+                            setSelectedWard(ALL_SCOPE);
+                        }}
+                        className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    >
+                        <option value={ALL_SCOPE}>All Assemblies ({data.length})</option>
+                        {assemblies.map((assembly) => (
+                            <option key={assembly} value={assembly}>
+                                {assembly} ({data.filter((row) => row.assembly === assembly).length})
+                            </option>
+                        ))}
+                        {unassignedAssemblyCount > 0 && (
+                            <option value={UNASSIGNED_SCOPE}>Unassigned Assembly ({unassignedAssemblyCount})</option>
+                        )}
+                    </select>
+                    <label className="sr-only" htmlFor="analytics-ward">Filter insights by ward</label>
+                    <select
+                        id="analytics-ward"
+                        value={selectedWard}
+                        onChange={(event) => setSelectedWard(event.target.value)}
+                        className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={wards.length === 0 && unassignedWardCount === 0}
+                    >
+                        <option value={ALL_SCOPE}>All Wards ({assemblyScopedData.length})</option>
+                        {wards.map((ward) => (
+                            <option key={ward} value={ward}>
+                                {ward} ({assemblyScopedData.filter((row) => row.gba_ward === ward).length})
+                            </option>
+                        ))}
+                        {unassignedWardCount > 0 && (
+                            <option value={UNASSIGNED_SCOPE}>Unassigned Ward ({unassignedWardCount})</option>
+                        )}
+                    </select>
+                </div>
+            </motion.div>
+
             {/* Summary Cards */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <StatCard
@@ -137,7 +237,7 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
 
             {/* Charts Grid */}
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <ChartContainer title="Party Preferences (Cumulative)" icon={<TrendingUp className="h-4 w-4 text-indigo-500" />}>
+                <ChartContainer title={"Party Preferences (" + selectedScopeLabel + ")"} icon={<TrendingUp className="h-4 w-4 text-indigo-500" />}>
                     <div className="h-48 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={partyData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
@@ -158,7 +258,7 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponse[] }) {
                     </div>
                 </ChartContainer>
 
-                <ChartContainer title="Respondent Gender Distribution" icon={<Users className="h-4 w-4 text-emerald-500" />}>
+                <ChartContainer title={"Respondent Gender (" + selectedScopeLabel + ")"} icon={<Users className="h-4 w-4 text-emerald-500" />}>
                     <div className="h-48 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
