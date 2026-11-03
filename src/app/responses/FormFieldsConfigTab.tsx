@@ -20,6 +20,7 @@ export default function FormFieldsConfigTab() {
   const [loadingScope, setLoadingScope] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [resolvedFrom, setResolvedFrom] = useState<string | null>(null);
 
   useEffect(() => {
     axios
@@ -43,26 +44,35 @@ export default function FormFieldsConfigTab() {
   }, [assemblyNo]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadConfig = async () => {
       setLoadingScope(true);
       setMessage(null);
+      setResolvedFrom(null);
       try {
         const token = localStorage.getItem("token");
-        const res = await axios.get(`${API_BASE_URL}/api/survey-form-config`, {
+        const res = await axios.get<SurveyFieldConfig>(`${API_BASE_URL}/api/survey-form-config`, {
           params: {
             ...(assemblyNo ? { assembly_no: Number(assemblyNo) } : {}),
             ...(wardId ? { ward_id: Number(wardId) } : {}),
           },
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
+        if (cancelled) return;
         setConfig(mergeFieldConfig(res.data));
+        setResolvedFrom(res.data.resolvedFrom ?? null);
       } catch {
+        if (cancelled) return;
         setConfig(DEFAULT_SURVEY_FIELD_CONFIG);
+        setResolvedFrom(null);
       } finally {
-        setLoadingScope(false);
+        if (!cancelled) setLoadingScope(false);
       }
     };
     void loadConfig();
+    return () => {
+      cancelled = true;
+    };
   }, [assemblyNo, wardId]);
 
   const selectAssembly = (value: string) => {
@@ -97,6 +107,7 @@ export default function FormFieldsConfigTab() {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       setConfig(mergeFieldConfig(res.data));
+      setResolvedFrom(wardId ? "ward" : assemblyNo ? "assembly" : "global");
       setMessage(wardId ? "Saved ward form field settings." : assemblyNo ? "Saved assembly form field settings." : "Saved global form field settings.");
     } catch {
       setMessage("Failed to save settings.");
@@ -137,9 +148,19 @@ export default function FormFieldsConfigTab() {
             </select>
           </label>
         </div>
+        {resolvedFrom && !loadingScope && (
+          <p className="mt-3 text-sm text-slate-600">
+            {resolvedFrom === "ward" && "Showing saved settings for this ward."}
+            {resolvedFrom === "assembly" &&
+              "No ward-only save yet — showing assembly-wide settings (same for all wards in this assembly without their own save)."}
+            {resolvedFrom === "global" &&
+              "No ward or assembly save — showing global defaults."}
+            {resolvedFrom === "defaults" && "Using built-in defaults (nothing saved yet)."}
+          </p>
+        )}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className={`grid md:grid-cols-2 gap-6 ${loadingScope ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="rounded-xl border border-slate-200 p-4 space-y-2">
           <h3 className="font-bold text-slate-800">Surveyor Information</h3>
           {Object.entries(SURVEYOR_FIELD_LABELS).map(([key, label]) => (

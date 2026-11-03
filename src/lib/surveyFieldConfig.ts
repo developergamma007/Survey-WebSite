@@ -3,6 +3,8 @@ export type SurveyFieldConfig = {
   voterFields: Record<string, boolean>;
   enableVoterSearch: boolean;
   manualEntryWhenApiEmpty: boolean;
+  /** Present on admin loads: ward | assembly | global | defaults */
+  resolvedFrom?: string | null;
 };
 
 export const DEFAULT_SURVEY_FIELD_CONFIG: SurveyFieldConfig = {
