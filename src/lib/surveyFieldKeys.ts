@@ -254,11 +254,8 @@ export function exportRecordsCsv(
       columns
         .map((col) => {
           if (col.key === "audio") {
-            const link = getAudioExportLink(row);
-            if (link) return escapeCsv(link);
-            return escapeCsv(
-              row.has_audio || row.audio_url || row.audio_base64 ? "Recorded (no public link)" : "Silent"
-            );
+            const hasAudio = getAudioExportLink(row) || row.has_audio || row.audio_url || row.audio_base64;
+            return escapeCsv(hasAudio ? "Survey record" : "Silent");
           }
           return escapeCsv(getRecordCellValue(row, col.key, col.legacyKeys));
         })

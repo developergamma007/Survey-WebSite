@@ -229,9 +229,14 @@ export function Home() {
     boot();
   }, []);
 
-  const fetchFieldConfig = async () => {
+  const fetchFieldConfig = async (assemblyNo?: number | null, wardId?: number | null) => {
     try {
-      const res = await axiosInstance.get<SurveyFieldConfig>("/api/survey-form-config");
+      const res = await axiosInstance.get<SurveyFieldConfig>("/api/survey-form-config", {
+        params: {
+          ...(assemblyNo ? { assembly_no: assemblyNo } : {}),
+          ...(wardId ? { ward_id: wardId } : {}),
+        },
+      });
       setFieldConfig(mergeFieldConfig(res.data));
     } catch {
       setFieldConfig(DEFAULT_SURVEY_FIELD_CONFIG);
@@ -250,6 +255,7 @@ export function Home() {
       gbaWardId: ward.id,
     }));
 
+    void fetchFieldConfig(ward.assembly_no, ward.id);
     fetchDynamicQuestions(ward.ward_name_en);
     fetchBooths(ward.id);
   }, [linkedWardName, wards]);
