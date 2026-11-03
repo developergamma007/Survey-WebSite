@@ -6,6 +6,14 @@ import { motion } from "framer-motion";
 import { API_BASE_URL } from "@/lib/config";
 import { finalizeMediaRecorder } from "@/lib/audioRecording";
 import { MAX_SURVEY_AUDIO_MS } from "@/lib/audioLimits";
+import {
+    createSurveyMediaRecorder,
+    surveyRecorderBlobType,
+} from "@/lib/surveyMediaRecorder";
+import {
+    formatSurveyRecordingClock,
+    useSurveyRecordingTimer,
+} from "@/lib/useSurveyRecordingTimer";
 import { uploadSurveyAudio } from "@/lib/surveyAudioUpload";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
@@ -76,6 +84,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const [dynamicAnswers, setDynamicAnswers] = useState<Record<string, string>>({});
     const [audioRecording, setAudioRecording] = useState(false);
+    const recordingElapsedSec = useSurveyRecordingTimer(audioRecording);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [audioBase64, setAudioBase64] = useState<string | null>(null);
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -211,13 +220,18 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     const startRecording = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const recorder = new MediaRecorder(stream);
+            const recorder = createSurveyMediaRecorder(stream);
+            const blobType = surveyRecorderBlobType(recorder);
             audioChunksRef.current = [];
             recorder.ondataavailable = (e) => {
                 if (e.data.size > 0) audioChunksRef.current.push(e.data);
             };
+            recorder.onerror = () => {
+                setSubmitMessage("Audio recording stopped unexpectedly. Submit soon to save what was captured.");
+                stopRecording();
+            };
             recorder.onstop = () => {
-                const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+                const blob = new Blob(audioChunksRef.current, { type: blobType });
                 if (blob.size > 0) {
                     setAudioUrl(URL.createObjectURL(blob));
                     const reader = new FileReader();
@@ -373,7 +387,8 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
             const recordedAudio = await finalizeMediaRecorder(
                 mediaRecorderRef.current,
                 audioChunksRef.current,
-                audioBase64
+                audioBase64,
+                surveyRecorderBlobType(mediaRecorderRef.current)
             );
             setAudioRecording(false);
             if (recordedAudio) setAudioBase64(recordedAudio);
@@ -519,7 +534,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                         </div>
                         <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-2">Ready to collect data?</p>
                         <p className="text-slate-400 text-xs text-center border-t border-slate-100 pt-4 mt-2">
-                            Audio recording and location will begin automatically
+                            Mic and GPS start when you begin (up to 30 min audio, until you submit)
                         </p>
                     </div>
                 ) : (
@@ -754,7 +769,11 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                             <div className="flex items-center gap-4">
                                 <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${audioRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
                                     <div className={`w-2 h-2 rounded-full ${audioRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`}></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest">{audioRecording ? "Capturing Audio" : "Mic Standby"}</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">
+                                        {audioRecording
+                                            ? `Recording ${formatSurveyRecordingClock(recordingElapsedSec)}`
+                                            : "Mic standby"}
+                                    </span>
                                 </div>
                                 {location.latitude && (
                                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600">

@@ -8,11 +8,11 @@ import WardFilterSelect from "./WardFilterSelect";
 import { hasSurveyAudio } from "@/lib/audioRecording";
 import {
   BASE_RECORD_COLUMNS,
-  exportRecordsCsv,
   getRecordCellValue,
   type RecordColumn,
   type SurveyResponseRow,
 } from "@/lib/surveyFieldKeys";
+import { exportRecordsExcel } from "@/lib/surveyAudioExport";
 import { questionAnswerKey, questionColumnLabel } from "@/lib/surveyText";
 
 const ROWS_PER_BATCH = 40;
@@ -192,9 +192,9 @@ export default function FieldRecordsTable({ responses }: Props) {
     return () => observer.disconnect();
   }, [hasMore, loadMore, visibleRows.length]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const slug = selectedWard ? selectedWard.replace(/\s+/g, "-") : "all-wards";
-    exportRecordsCsv(filteredRows, visibleColumns, `field-records-${slug}.csv`);
+    await exportRecordsExcel(filteredRows, visibleColumns, `field-records-${slug}.xlsx`);
   };
 
   return (
@@ -213,7 +213,7 @@ export default function FieldRecordsTable({ responses }: Props) {
         </div>
         <button type="button" onClick={handleExport} className="ps-field-records-export">
           <Download size={14} />
-          Export CSV
+          Export Excel
         </button>
       </div>
 

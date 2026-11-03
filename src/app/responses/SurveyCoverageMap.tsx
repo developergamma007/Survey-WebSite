@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, MapPin } from "lucide-react";
-import { loadGoogleMapsScript } from "@/lib/googleMaps";
+import { buildPointsGoogleMap } from "@/lib/googleMap";
 
 export type SurveyMapPoint = {
   id: number;
@@ -46,65 +46,34 @@ export default function SurveyCoverageMap({ points }: { points: SurveyMapPoint[]
 
   useEffect(() => {
     let active = true;
-    let markers: any[] = [];
-    let infoWindows: any[] = [];
+    let cleanup: { markers: any[]; infoWindows: any[] } | null = null;
 
     const renderMap = async () => {
       if (!containerRef.current || !points.length) return;
       setError(null);
       try {
-        const google = await loadGoogleMapsScript();
-        if (!active || !containerRef.current) return;
-        containerRef.current.innerHTML = "";
-        const map = new google.maps.Map(containerRef.current, {
-          center: { lat: points[0].latitude, lng: points[0].longitude },
-          zoom: 13,
-          mapTypeControl: true,
-          fullscreenControl: true,
-          streetViewControl: false,
+        const result = await buildPointsGoogleMap(containerRef.current, points, {
+          getColor: (point) => markerColor(point.gender),
+          getPopupHtml: popupHtml,
         });
-        const bounds = new google.maps.LatLngBounds();
-
-        markers = points.map((point) => {
-          const marker = new google.maps.Marker({
-            map,
-            position: { lat: point.latitude, lng: point.longitude },
-            title: point.name,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: markerColor(point.gender),
-              fillOpacity: 0.95,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
-          });
-          const infoWindow = new google.maps.InfoWindow({ content: popupHtml(point), maxWidth: 340 });
-          marker.addListener("click", () => {
-            infoWindows.forEach((item) => item.close());
-            infoWindow.open({ map, anchor: marker });
-          });
-          infoWindows.push(infoWindow);
-          bounds.extend(marker.getPosition());
-          return marker;
-        });
-
-        if (markers.length === 1) map.setZoom(16);
-        else map.fitBounds(bounds, 48);
-        window.requestAnimationFrame(() => {
-          google.maps.event.trigger(map, "resize");
-          if (markers.length > 1) map.fitBounds(bounds, 48);
-        });
+        if (!active) {
+          result.markers.forEach((marker) => marker.setMap(null));
+          result.infoWindows.forEach((window) => window.close());
+          return;
+        }
+        cleanup = result;
       } catch (reason) {
-        if (active) setError(reason instanceof Error ? reason.message : "Unable to load the map.");
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "Unable to load the map.");
+        }
       }
     };
 
-    renderMap();
+    void renderMap();
     return () => {
       active = false;
-      markers.forEach((marker) => marker.setMap(null));
-      infoWindows.forEach((window) => window.close());
+      cleanup?.markers.forEach((marker) => marker.setMap(null));
+      cleanup?.infoWindows.forEach((window) => window.close());
     };
   }, [points]);
 
@@ -114,9 +83,27 @@ export default function SurveyCoverageMap({ points }: { points: SurveyMapPoint[]
   if (error) {
     return <EmptyMap message={error} error />;
   }
-  return <div ref={containerRef} className="mt-4 h-[440px] w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100" aria-label="Survey GPS coverage map" />;
+  return (
+    <div
+      ref={containerRef}
+      className="mt-4 h-[440px] w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+      aria-label="Survey GPS coverage map"
+    />
+  );
 }
 
 function EmptyMap({ message, error = false }: { message: string; error?: boolean }) {
-  return <div className="mt-4 flex min-h-48 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center"><div><span className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full ${error ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-400"}`}>{error ? <AlertCircle className="h-5 w-5" /> : <MapPin className="h-5 w-5" />}</span><p className="mt-2 text-sm font-semibold text-slate-600">{error ? "Map unavailable" : "No GPS-tagged survey responses"}</p><p className="mt-1 max-w-sm text-xs text-slate-500">{message}</p></div></div>;
+  return (
+    <div className="mt-4 flex min-h-48 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
+      <div>
+        <span
+          className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full ${error ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-400"}`}
+        >
+          {error ? <AlertCircle className="h-5 w-5" /> : <MapPin className="h-5 w-5" />}
+        </span>
+        <p className="mt-2 text-sm font-semibold text-slate-600">{error ? "Map unavailable" : "No GPS-tagged survey responses"}</p>
+        <p className="mt-1 max-w-sm text-xs text-slate-500">{message}</p>
+      </div>
+    </div>
+  );
 }

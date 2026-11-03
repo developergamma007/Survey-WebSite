@@ -49,7 +49,7 @@ export const BASE_RECORD_COLUMNS: RecordColumn[] = [
   { key: "submission_date", label: "Submission Date" },
   { key: "survey_start", label: "Survey Start Time" },
   { key: "survey_end", label: "Survey End Time" },
-  { key: "audio", label: "Audio" },
+  { key: "audio", label: "Survey audio" },
   { key: "geotag", label: "Geotag" },
   { key: "team_code", label: "Team Code" },
   { key: "voter_of_constituency", label: "Voter of Constituency" },
@@ -236,42 +236,3 @@ export function buildStructuredDynamicAnswers(input: FormPayloadInput): Record<s
   return merged;
 }
 
-export function getAudioExportLink(row: SurveyResponseRow): string {
-  if (row.audio_link?.trim()) return row.audio_link.trim();
-  if (row.audio_url?.startsWith("http")) return row.audio_url;
-  return "";
-}
-
-export function exportRecordsCsv(
-  rows: SurveyResponseRow[],
-  columns: RecordColumn[],
-  filename = "field-records.csv"
-) {
-  const headers = columns.map((col) => col.label);
-  const lines = [
-    headers.map(escapeCsv).join(","),
-    ...rows.map((row) =>
-      columns
-        .map((col) => {
-          if (col.key === "audio") {
-            const hasAudio = getAudioExportLink(row) || row.has_audio || row.audio_url || row.audio_base64;
-            return escapeCsv(hasAudio ? "Survey record" : "Silent");
-          }
-          return escapeCsv(getRecordCellValue(row, col.key, col.legacyKeys));
-        })
-        .join(",")
-    ),
-  ];
-
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function escapeCsv(value: string): string {
-  return `"${String(value ?? "").replace(/"/g, '""')}"`;
-}

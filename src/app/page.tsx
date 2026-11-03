@@ -12,6 +12,14 @@ import { API_BASE_URL } from "@/lib/config";
 import { isAdminSubmitter } from "@/lib/adminUsers";
 import { finalizeMediaRecorder } from "@/lib/audioRecording";
 import { MAX_SURVEY_AUDIO_MS } from "@/lib/audioLimits";
+import {
+  createSurveyMediaRecorder,
+  surveyRecorderBlobType,
+} from "@/lib/surveyMediaRecorder";
+import {
+  formatSurveyRecordingClock,
+  useSurveyRecordingTimer,
+} from "@/lib/useSurveyRecordingTimer";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 import {
   digitsOnly,
@@ -31,6 +39,11 @@ import {
   pickVoterValue,
   type VoterSuggestion,
 } from "@/lib/voterSearch";
+import {
+  assemblyLabelForWard,
+  findWardByLinkedName,
+  normalizeWardQueryParam,
+} from "@/lib/wardContext";
 import {
   clearSurveyorSession,
   fetchMySurveyEntryCount,
@@ -177,6 +190,7 @@ export function Home() {
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [isSurveyStarted, setIsSurveyStarted] = useState(false);
   const [surveyStartedAt, setSurveyStartedAt] = useState<string | null>(null);
+  const recordingElapsedSec = useSurveyRecordingTimer(audioRecording);
 
   useEffect(() => {
     isSurveyStartedRef.current = isSurveyStarted;
@@ -197,6 +211,11 @@ export function Home() {
   const [respondentVerified, setRespondentVerified] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [wards, setWards] = useState<Ward[]>([]);
+  const [assemblies, setAssemblies] = useState<
+    Array<{ assembly_no: number; assembly_name_en: string | null }>
+  >([]);
+  const [wardsLoading, setWardsLoading] = useState(true);
+  const [wardResolveError, setWardResolveError] = useState<string | null>(null);
   const [booths, setBooths] = useState<Booth[]>([]);
   const [dynamicQuestions, setDynamicQuestions] = useState<DynamicQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -210,7 +229,7 @@ export function Home() {
   const [fieldConfig, setFieldConfig] = useState<SurveyFieldConfig>(DEFAULT_SURVEY_FIELD_CONFIG);
 
   const searchParams = useSearchParams();
-  const linkedWardName = decodeURIComponent(searchParams.get("ward") || "").trim();
+  const linkedWardName = normalizeWardQueryParam(searchParams.get("ward"));
   const useManualBooth = fieldConfig.manualEntryWhenApiEmpty && booths.length === 0;
   const showVoterSearch = fieldConfig.enableVoterSearch && form.gbaWardId > 0;
   const sf = fieldConfig.surveyorFields;
@@ -224,7 +243,13 @@ export function Home() {
 
   useEffect(() => {
     const boot = async () => {
-      await Promise.all([fetchAllWards(), fetchFieldConfig()]);
+      // If a ward is pre-selected via ?ward=, don't fetch global config here —
+      // the linkedWardName effect will load the scoped config once wards arrive.
+      if (linkedWardName) {
+        await Promise.all([fetchAllWards(), fetchAssemblies()]);
+      } else {
+        await Promise.all([fetchAllWards(), fetchAssemblies(), fetchFieldConfig()]);
+      }
     };
     boot();
   }, []);
@@ -246,19 +271,36 @@ export function Home() {
   useEffect(() => {
     if (!linkedWardName || wards.length === 0) return;
 
-    const ward = wards.find((w) => w.ward_name_en === linkedWardName);
-    if (!ward) return;
+    const ward = findWardByLinkedName(wards, linkedWardName);
+    if (!ward?.ward_name_en) {
+      setWardResolveError(
+        `Could not match ward "${linkedWardName}". Open the survey from Survey Flow → Copy Link.`
+      );
+      setForm((prev) => ({
+        ...prev,
+        gbaWard: linkedWardName,
+        gbaWardId: 0,
+        assembly: "",
+        assemblyNo: 0,
+      }));
+      return;
+    }
+
+    setWardResolveError(null);
+    const { assemblyNo, assemblyName } = assemblyLabelForWard(ward, assemblies);
 
     setForm((prev) => ({
       ...prev,
-      gbaWard: ward.ward_name_en,
+      gbaWard: ward.ward_name_en ?? linkedWardName,
       gbaWardId: ward.id,
+      assembly: assemblyName,
+      assemblyNo,
     }));
 
     void fetchFieldConfig(ward.assembly_no, ward.id);
     fetchDynamicQuestions(ward.ward_name_en);
     fetchBooths(ward.id);
-  }, [linkedWardName, wards]);
+  }, [linkedWardName, wards, assemblies]);
   // Restore surveyor session and auto-fill surveyor fields
   useEffect(() => {
     const initSession = async () => {
@@ -331,6 +373,18 @@ export function Home() {
       if (selectedWard?.ward_name_en) {
         fetchDynamicQuestions(selectedWard.ward_name_en);
       }
+      const { assemblyNo, assemblyName } = assemblyLabelForWard(selectedWard, assemblies);
+      if (assemblyName) {
+        setForm((prev) => ({
+          ...prev,
+          assembly: assemblyName,
+          assemblyNo,
+        }));
+      }
+      void fetchFieldConfig(selectedWard?.assembly_no, form.gbaWardId);
+    } else if (form.gbaWardId === 0) {
+      // Ward cleared — fall back to global config
+      void fetchFieldConfig();
     }
   }, [form.gbaWardId, wards]);
 
@@ -344,6 +398,7 @@ export function Home() {
   };
 
   const fetchAllWards = async () => {
+    setWardsLoading(true);
     try {
       const response = await axiosInstance.get<Ward[]>("/api/wards");
       setWards(response.data);
@@ -351,7 +406,20 @@ export function Home() {
       console.error("Error fetching wards:", error);
       setSubmitMessage("Failed to load wards. Please try again.");
     } finally {
+      setWardsLoading(false);
       setLoading(false);
+    }
+  };
+
+  const fetchAssemblies = async () => {
+    try {
+      const response = await axiosInstance.get<
+        Array<{ assembly_no: number; assembly_name_en: string | null }>
+      >("/api/assemblies");
+      setAssemblies(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error("Error fetching assemblies:", error);
+      setAssemblies([]);
     }
   };
 
@@ -391,7 +459,8 @@ export function Home() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const recorder = createSurveyMediaRecorder(stream);
+      const blobType = surveyRecorderBlobType(recorder);
       audioChunksRef.current = [];
 
       recorder.ondataavailable = (event) => {
@@ -400,8 +469,13 @@ export function Home() {
         }
       };
 
+      recorder.onerror = () => {
+        setSubmitMessage("Audio recording stopped unexpectedly. Submit soon to save what was captured.");
+        stopRecording();
+      };
+
       recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(audioChunksRef.current, { type: blobType });
         if (blob.size > 0) {
           setAudioUrl(URL.createObjectURL(blob));
           const reader = new FileReader();
@@ -680,7 +754,8 @@ export function Home() {
       const recordedAudio = await finalizeMediaRecorder(
         mediaRecorderRef.current,
         audioChunksRef.current,
-        audioBase64
+        audioBase64,
+        surveyRecorderBlobType(mediaRecorderRef.current)
       );
       setAudioRecording(false);
       if (recordedAudio) {
@@ -902,7 +977,7 @@ export function Home() {
                 Your completed survey entries: <span className="text-base font-black">{mySurveyEntryCount ?? "..."}</span>
               </p>
               <p className="survey-hero-title survey-entry-count-followup">Ready to collect data?</p>
-              <p className="survey-hero-sub">Audio recording and GPS tracking will activate on start</p>
+              <p className="survey-hero-sub">Mic and GPS start on &quot;Start Survey&quot; (up to 30 min audio, until you submit)</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-700">
@@ -915,19 +990,46 @@ export function Home() {
                     </h2>
                     <div className="space-y-4">
                       {(sf.ward ?? true) && (
-                        <div className="space-y-1">
-                          <label className="survey-field-readonly-label text-[10px] font-black uppercase ml-1">Ward Name</label>
-                          <div className="survey-field-readonly-wrap">
-                            <input
-                              value={form.gbaWard}
-                              readOnly
-                              tabIndex={-1}
-                              placeholder={linkedWardName ? "Loading ward…" : "Open your ward survey link"}
-                              className="survey-field-readonly w-full px-4 py-3 rounded-xl border text-sm font-bold"
-                            />
-                            <Lock className="survey-field-readonly-icon" size={16} aria-hidden />
+                        <>
+                          <div className="space-y-1">
+                            <label className="survey-field-readonly-label text-[10px] font-black uppercase ml-1">
+                              Assembly Name
+                            </label>
+                            <div className="survey-field-readonly-wrap">
+                              <input
+                                value={
+                                  form.assembly ||
+                                  (wardsLoading ? "Loading assembly…" : "")
+                                }
+                                readOnly
+                                tabIndex={-1}
+                                placeholder={linkedWardName ? "Loading assembly…" : "—"}
+                                className="survey-field-readonly w-full px-4 py-3 rounded-xl border text-sm font-bold"
+                              />
+                              <Lock className="survey-field-readonly-icon" size={16} aria-hidden />
+                            </div>
                           </div>
-                        </div>
+                          <div className="space-y-1">
+                            <label className="survey-field-readonly-label text-[10px] font-black uppercase ml-1">Ward Name</label>
+                            <div className="survey-field-readonly-wrap">
+                              <input
+                                value={form.gbaWard || linkedWardName}
+                                readOnly
+                                tabIndex={-1}
+                                placeholder={
+                                  wardsLoading && !linkedWardName
+                                    ? "Loading ward…"
+                                    : "Open your ward survey link"
+                                }
+                                className="survey-field-readonly w-full px-4 py-3 rounded-xl border text-sm font-bold"
+                              />
+                              <Lock className="survey-field-readonly-icon" size={16} aria-hidden />
+                            </div>
+                            {wardResolveError ? (
+                              <p className="text-xs font-semibold text-amber-700 ml-1">{wardResolveError}</p>
+                            ) : null}
+                          </div>
+                        </>
                       )}
                       {(sf.pollingStation ?? true) && (
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1080,6 +1182,7 @@ export function Home() {
                           Enter voter details manually below.
                         </p>
                       )}
+                      {(vf.interviewerName ?? true) && (
                       <div className="space-y-1">
                         <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Name</label>
                         <input
@@ -1090,7 +1193,9 @@ export function Home() {
                           className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                         />
                       </div>
+                      )}
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {(vf.interviewerAge ?? true) && (
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Age</label>
                           <input
@@ -1101,6 +1206,8 @@ export function Home() {
                             className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                           />
                         </div>
+                        )}
+                        {(vf.interviewerGender ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Gender"
@@ -1114,8 +1221,10 @@ export function Home() {
                             onChange={(val: number | string) => updateField("interviewerGender", val as string)}
                           />
                         </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {(vf.interviewerCaste ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Caste"
@@ -1142,6 +1251,8 @@ export function Home() {
                             />
                           )}
                         </div>
+                        )}
+                        {(vf.interviewerCommunity ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Community"
@@ -1165,8 +1276,10 @@ export function Home() {
                             />
                           )}
                         </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {(vf.interviewerEducation ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Education"
@@ -1191,6 +1304,8 @@ export function Home() {
                             />
                           )}
                         </div>
+                        )}
+                        {(vf.interviewerMobile ?? true) && (
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Voter Mobile</label>
                           <div className="flex gap-2">
@@ -1213,8 +1328,10 @@ export function Home() {
                             </button>
                           </div>
                         </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {(vf.voterOfConstituency ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Voter of Constituency"
@@ -1227,6 +1344,8 @@ export function Home() {
                             onChange={(val: number | string) => updateField("voterOfConstituency", val as string)}
                           />
                         </div>
+                        )}
+                        {(vf.interviewerHouseholdIncome ?? true) && (
                         <div className="space-y-1">
                           <CustomDropdown
                             label="Household Income"
@@ -1242,8 +1361,10 @@ export function Home() {
                             onChange={(val: number | string) => updateField("interviewerHouseholdIncome", val as string)}
                           />
                         </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {(vf.interviewerWork ?? true) && (
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Occupation</label>
                           <input
@@ -1254,6 +1375,8 @@ export function Home() {
                             className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                           />
                         </div>
+                        )}
+                        {(vf.interviewerCurrentAddress ?? true) && (
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Current Address</label>
                           <input
@@ -1264,6 +1387,7 @@ export function Home() {
                             className="w-full bg-white px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
                           />
                         </div>
+                        )}
                       </div>
                       {form.gbaWard ? (
                         <p className="text-[10px] font-semibold text-slate-400">
@@ -1296,8 +1420,17 @@ export function Home() {
 
               {/* Form Footer */}
               <div className="pt-8 border-t border-slate-200 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full border ${audioRecording ? "bg-red-50 border-red-200 text-red-600" : "bg-slate-50 border-slate-200 text-slate-400"}`}
+                  >
+                    <div className={`w-2 h-2 rounded-full ${audioRecording ? "bg-red-500 animate-pulse" : "bg-slate-300"}`} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">
+                      {audioRecording
+                        ? `Recording ${formatSurveyRecordingClock(recordingElapsedSec)}`
+                        : "Mic standby"}
+                    </span>
+                  </div>
                   {location.latitude && (
                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600">
                       <span className="text-[10px] font-black tracking-tighter">GPS: {location.latitude.toFixed(4)}, {location.longitude?.toFixed(4)}</span>

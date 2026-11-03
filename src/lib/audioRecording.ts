@@ -18,6 +18,32 @@ export async function fetchSurveyAudioUrl(surveyId: number): Promise<string> {
   return data.url;
 }
 
+export async function downloadSurveyAudioFile(surveyId: number): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) {
+    throw new Error("Not authenticated");
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/responses/${surveyId}/audio/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to download audio");
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match?.[1] || `survey-${surveyId}.webm`;
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export function hasSurveyAudio(row: {
   has_audio?: boolean;
   audio_url?: string | null;
@@ -39,7 +65,8 @@ export function normalizeAudioSrc(value: string | null | undefined): string | nu
 export function finalizeMediaRecorder(
   recorder: MediaRecorder | null,
   chunks: BlobPart[],
-  fallback: string | null = null
+  fallback: string | null = null,
+  blobType = "audio/webm"
 ): Promise<string | null> {
   return new Promise((resolve) => {
     if (!recorder || recorder.state === "inactive") {
@@ -54,7 +81,7 @@ export function finalizeMediaRecorder(
         // ignore
       }
 
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      const blob = new Blob(chunks, { type: blobType });
       if (blob.size === 0) {
         resolve(fallback);
         return;
