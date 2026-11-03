@@ -38,6 +38,20 @@ export function mergeFieldConfig(raw: Partial<SurveyFieldConfig> | null | undefi
     enableVoterSearch: raw?.enableVoterSearch ?? DEFAULT_SURVEY_FIELD_CONFIG.enableVoterSearch,
     manualEntryWhenApiEmpty:
       raw?.manualEntryWhenApiEmpty ?? DEFAULT_SURVEY_FIELD_CONFIG.manualEntryWhenApiEmpty,
+    resolvedFrom: raw?.resolvedFrom ?? null,
+  };
+}
+
+/** PUT body: field flags + explicit save scope (ward / assembly / global). */
+export function buildFormConfigPutBody(
+  config: SurveyFieldConfig,
+  scope: { assemblyNo: string; wardId: string },
+): Record<string, unknown> {
+  const { resolvedFrom: _ignored, ...fields } = config;
+  return {
+    ...fields,
+    scope_assembly_no: scope.assemblyNo ? Number(scope.assemblyNo) : null,
+    scope_ward_id: scope.wardId ? Number(scope.wardId) : null,
   };
 }
 

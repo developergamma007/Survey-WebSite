@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "@/lib/config";
 import {
   DEFAULT_SURVEY_FIELD_CONFIG,
+  buildFormConfigPutBody,
   mergeFieldConfig,
   SURVEYOR_FIELD_LABELS,
   VOTER_FIELD_LABELS,
@@ -99,13 +100,17 @@ export default function FormFieldsConfigTab() {
     setMessage(null);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.put(`${API_BASE_URL}/api/survey-form-config`, config, {
-        params: {
-          ...(assemblyNo ? { assembly_no: Number(assemblyNo) } : {}),
-          ...(wardId ? { ward_id: Number(wardId) } : {}),
+      const res = await axios.put(
+        `${API_BASE_URL}/api/survey-form-config`,
+        buildFormConfigPutBody(config, { assemblyNo, wardId }),
+        {
+          params: {
+            ...(assemblyNo ? { assembly_no: Number(assemblyNo) } : {}),
+            ...(wardId ? { ward_id: Number(wardId) } : {}),
+          },
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      );
       setConfig(mergeFieldConfig(res.data));
       setResolvedFrom(wardId ? "ward" : assemblyNo ? "assembly" : "global");
       setMessage(wardId ? "Saved ward form field settings." : assemblyNo ? "Saved assembly form field settings." : "Saved global form field settings.");
@@ -206,6 +211,26 @@ export default function FormFieldsConfigTab() {
           />
           Allow manual text entry when API lists are empty
         </label>
+      </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <span className="font-bold">Save will apply to: </span>
+        {wardId ? (
+          <>
+            this ward only —{" "}
+            <span className="font-semibold">
+              {wards.find((w) => String(w.id) === wardId)?.ward_name_en ?? "Unknown ward"} (id {wardId})
+            </span>
+          </>
+        ) : assemblyNo ? (
+          <>
+            <span className="font-semibold">all wards</span> in{" "}
+            {assemblies.find((a) => String(a.assembly_no) === assemblyNo)?.assembly_name_en ?? "this assembly"} (
+            {assemblyNo}) — wards without their own save inherit this
+          </>
+        ) : (
+          <span className="font-semibold">every assembly (global default)</span>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
