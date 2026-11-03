@@ -10,10 +10,6 @@ import {
     createSurveyMediaRecorder,
     surveyRecorderBlobType,
 } from "@/lib/surveyMediaRecorder";
-import {
-    formatSurveyRecordingClock,
-    useSurveyRecordingTimer,
-} from "@/lib/useSurveyRecordingTimer";
 import { uploadSurveyAudio } from "@/lib/surveyAudioUpload";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
@@ -84,7 +80,6 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
 
     const [dynamicAnswers, setDynamicAnswers] = useState<Record<string, string>>({});
     const [audioRecording, setAudioRecording] = useState(false);
-    const recordingElapsedSec = useSurveyRecordingTimer(audioRecording);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [audioBase64, setAudioBase64] = useState<string | null>(null);
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -534,7 +529,7 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                         </div>
                         <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-2">Ready to collect data?</p>
                         <p className="text-slate-400 text-xs text-center border-t border-slate-100 pt-4 mt-2">
-                            Mic and GPS start when you begin (up to 30 min audio, until you submit)
+                            GPS location is captured when you start the survey.
                         </p>
                     </div>
                 ) : (
@@ -767,14 +762,6 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
                         {/* Status & Submit */}
                         <div className="pt-8 border-t border-slate-200 flex items-center justify-between">
                             <div className="flex items-center gap-4">
-                                <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${audioRecording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-                                    <div className={`w-2 h-2 rounded-full ${audioRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`}></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest">
-                                        {audioRecording
-                                            ? `Recording ${formatSurveyRecordingClock(recordingElapsedSec)}`
-                                            : "Mic standby"}
-                                    </span>
-                                </div>
                                 {location.latitude && (
                                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600">
                                         <span className="text-[10px] font-black tracking-tighter">GPS: {location.latitude.toFixed(4)}, {location.longitude?.toFixed(4)}</span>

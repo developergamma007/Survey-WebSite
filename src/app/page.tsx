@@ -16,10 +16,6 @@ import {
   createSurveyMediaRecorder,
   surveyRecorderBlobType,
 } from "@/lib/surveyMediaRecorder";
-import {
-  formatSurveyRecordingClock,
-  useSurveyRecordingTimer,
-} from "@/lib/useSurveyRecordingTimer";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
 import {
   digitsOnly,
@@ -190,8 +186,6 @@ export function Home() {
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [isSurveyStarted, setIsSurveyStarted] = useState(false);
   const [surveyStartedAt, setSurveyStartedAt] = useState<string | null>(null);
-  const recordingElapsedSec = useSurveyRecordingTimer(audioRecording);
-
   useEffect(() => {
     isSurveyStartedRef.current = isSurveyStarted;
   }, [isSurveyStarted]);
@@ -977,7 +971,7 @@ export function Home() {
                 Your completed survey entries: <span className="text-base font-black">{mySurveyEntryCount ?? "..."}</span>
               </p>
               <p className="survey-hero-title survey-entry-count-followup">Ready to collect data?</p>
-              <p className="survey-hero-sub">Mic and GPS start on &quot;Start Survey&quot; (up to 30 min audio, until you submit)</p>
+              <p className="survey-hero-sub">GPS location is captured when you start the survey.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in duration-700">
@@ -1421,16 +1415,6 @@ export function Home() {
               {/* Form Footer */}
               <div className="pt-8 border-t border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-4 flex-wrap">
-                  <div
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full border ${audioRecording ? "bg-red-50 border-red-200 text-red-600" : "bg-slate-50 border-slate-200 text-slate-400"}`}
-                  >
-                    <div className={`w-2 h-2 rounded-full ${audioRecording ? "bg-red-500 animate-pulse" : "bg-slate-300"}`} />
-                    <span className="text-[10px] font-black uppercase tracking-widest">
-                      {audioRecording
-                        ? `Recording ${formatSurveyRecordingClock(recordingElapsedSec)}`
-                        : "Mic standby"}
-                    </span>
-                  </div>
                   {location.latitude && (
                     <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600">
                       <span className="text-[10px] font-black tracking-tighter">GPS: {location.latitude.toFixed(4)}, {location.longitude?.toFixed(4)}</span>
