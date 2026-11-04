@@ -322,9 +322,10 @@ function PieChartCard({
                                 ))}
                             </Pie>
                             <Tooltip
-                                formatter={(value: number, _name, item) => {
-                                    const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-                                    return [`${value} (${pct}%)`, item.payload?.name ?? "Count"];
+                                formatter={(value, _name, item) => {
+                                    const count = typeof value === "number" ? value : Number(value ?? 0);
+                                    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                                    return [`${count} (${pct}%)`, item.payload?.name ?? "Count"];
                                 }}
                                 contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)" }}
                             />

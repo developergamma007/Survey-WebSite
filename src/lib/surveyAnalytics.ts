@@ -67,16 +67,16 @@ export function questionsFromWardApi(
 export function mergeLegacyQuestionKeys(questions: AnalyticsQuestion[], rows: SurveyResponseRow[]): AnalyticsQuestion[] {
   const byKey = new Map(questions.map((q) => [q.key, q]));
   const legacy: AnalyticsQuestion[] = [];
-  for (let i = 1; i <= 4; i += 1) {
-    const key = `q${i}` as const;
+  const legacyKeys = ["q1", "q2", "q3", "q4"] as const;
+  for (const key of legacyKeys) {
     const hasAny = rows.some((row) => {
-      const v = row[key];
-      return typeof v === "string" && v.trim().length > 0;
+      const v = readLegacyAnswer(row, key);
+      return Boolean(v);
     });
     if (hasAny && !byKey.has(key)) {
       legacy.push({
         key,
-        label: `Legacy question ${i}`,
+        label: `Legacy question ${key.replace("q", "")}`,
         config: { type: "choice", options: [] },
       });
     }
@@ -85,8 +85,14 @@ export function mergeLegacyQuestionKeys(questions: AnalyticsQuestion[], rows: Su
 }
 
 function readLegacyAnswer(row: SurveyResponseRow, key: string): string | null {
+  const legacy = row as SurveyResponseRow & {
+    q1?: string | null;
+    q2?: string | null;
+    q3?: string | null;
+    q4?: string | null;
+  };
   if (key === "q1" || key === "q2" || key === "q3" || key === "q4") {
-    const v = row[key];
+    const v = legacy[key];
     return v?.trim() || null;
   }
   return null;
