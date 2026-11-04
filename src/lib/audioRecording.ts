@@ -62,15 +62,48 @@ export function normalizeAudioSrc(value: string | null | undefined): string | nu
   return `data:audio/webm;base64,${trimmed}`;
 }
 
-export function finalizeMediaRecorder(
+export type FinalizedSurveyRecording = {
+  blob: Blob | null;
+  dataUrl: string | null;
+};
+
+function blobFromChunks(chunks: BlobPart[], blobType: string): Blob | null {
+  if (chunks.length === 0) return null;
+  const blob = new Blob(chunks, { type: blobType });
+  return blob.size > 0 ? blob : null;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      resolve(typeof result === "string" && result.startsWith("data:") ? result : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** Prefer `blob` for upload; `dataUrl` is for legacy fallback only. */
+export function finalizeSurveyRecording(
   recorder: MediaRecorder | null,
   chunks: BlobPart[],
-  fallback: string | null = null,
+  fallbackDataUrl: string | null = null,
   blobType = "audio/webm"
-): Promise<string | null> {
+): Promise<FinalizedSurveyRecording> {
   return new Promise((resolve) => {
+    const finish = async (blob: Blob | null) => {
+      if (!blob) {
+        resolve({ blob: null, dataUrl: fallbackDataUrl });
+        return;
+      }
+      const dataUrl = (await blobToDataUrl(blob)) ?? fallbackDataUrl;
+      resolve({ blob, dataUrl });
+    };
+
     if (!recorder || recorder.state === "inactive") {
-      resolve(fallback);
+      void finish(blobFromChunks(chunks, blobType));
       return;
     }
 
@@ -80,17 +113,13 @@ export function finalizeMediaRecorder(
       } catch {
         // ignore
       }
-
-      const blob = new Blob(chunks, { type: blobType });
-      if (blob.size === 0) {
-        resolve(fallback);
-        return;
+      // WebKit can emit the last dataavailable chunk after onstop.
+      const assemble = () => void finish(blobFromChunks(chunks, blobType));
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => setTimeout(assemble, 50));
+      } else {
+        setTimeout(assemble, 50);
       }
-
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string) || fallback);
-      reader.onerror = () => resolve(fallback);
-      reader.readAsDataURL(blob);
     };
 
     try {
@@ -100,4 +129,14 @@ export function finalizeMediaRecorder(
     }
     recorder.stop();
   });
+}
+
+export async function finalizeMediaRecorder(
+  recorder: MediaRecorder | null,
+  chunks: BlobPart[],
+  fallback: string | null = null,
+  blobType = "audio/webm"
+): Promise<string | null> {
+  const { dataUrl } = await finalizeSurveyRecording(recorder, chunks, fallback, blobType);
+  return dataUrl;
 }

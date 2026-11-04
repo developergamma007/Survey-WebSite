@@ -4,10 +4,11 @@ import { useEffect, useRef, useState, use } from "react";
 import { Mic, MapPin, CheckCircle2, AlertCircle, Play, Square, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { API_BASE_URL } from "@/lib/config";
-import { finalizeMediaRecorder } from "@/lib/audioRecording";
+import { finalizeSurveyRecording } from "@/lib/audioRecording";
 import { MAX_SURVEY_AUDIO_MS } from "@/lib/audioLimits";
 import {
     createSurveyMediaRecorder,
+    isBrowserSurveyRecordingSupported,
     surveyRecorderBlobType,
 } from "@/lib/surveyMediaRecorder";
 import { uploadSurveyAudio } from "@/lib/surveyAudioUpload";
@@ -213,6 +214,12 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
     };
 
     const startRecording = async () => {
+        if (!isBrowserSurveyRecordingSupported()) {
+            setSubmitMessage(
+                "Audio recording needs a supported browser on HTTPS (Safari, Chrome, Edge). Open the survey link with https:// and allow the microphone."
+            );
+            return;
+        }
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const recorder = createSurveyMediaRecorder(stream);
@@ -379,15 +386,15 @@ export default function WardSurvey({ params }: { params: Promise<{ slug: string 
         setSubmitting(true);
 
         try {
-            const recordedAudio = await finalizeMediaRecorder(
+            const finalized = await finalizeSurveyRecording(
                 mediaRecorderRef.current,
                 audioChunksRef.current,
                 audioBase64,
                 surveyRecorderBlobType(mediaRecorderRef.current)
             );
             setAudioRecording(false);
-            if (recordedAudio) setAudioBase64(recordedAudio);
-            const audioUpload = await uploadSurveyAudio(recordedAudio);
+            if (finalized.dataUrl) setAudioBase64(finalized.dataUrl);
+            const audioUpload = await uploadSurveyAudio(finalized.blob ?? finalized.dataUrl);
 
             const voter = selectedVoter ?? ({} as VoterSuggestion);
             const structuredAnswers = buildStructuredDynamicAnswers({

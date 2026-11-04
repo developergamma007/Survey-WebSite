@@ -10,10 +10,11 @@ import SurveyDynamicQuestions from "@/components/SurveyDynamicQuestions";
 import PulseSyncLoginScreen from "@/components/PulseSyncLoginScreen";
 import { API_BASE_URL } from "@/lib/config";
 import { isAdminSubmitter } from "@/lib/adminUsers";
-import { finalizeMediaRecorder } from "@/lib/audioRecording";
+import { finalizeSurveyRecording } from "@/lib/audioRecording";
 import { MAX_SURVEY_AUDIO_MS } from "@/lib/audioLimits";
 import {
   createSurveyMediaRecorder,
+  isBrowserSurveyRecordingSupported,
   surveyRecorderBlobType,
 } from "@/lib/surveyMediaRecorder";
 import { buildStructuredDynamicAnswers } from "@/lib/surveyFieldKeys";
@@ -451,6 +452,12 @@ export function Home() {
   };
 
   const startRecording = async () => {
+    if (!isBrowserSurveyRecordingSupported()) {
+      setSubmitMessage(
+        "Audio recording needs a supported browser on HTTPS (Safari, Chrome, Edge). Open the survey link with https:// and allow the microphone."
+      );
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = createSurveyMediaRecorder(stream);
@@ -745,19 +752,19 @@ export function Home() {
     setSubmitting(true);
 
     try {
-      const recordedAudio = await finalizeMediaRecorder(
+      const finalized = await finalizeSurveyRecording(
         mediaRecorderRef.current,
         audioChunksRef.current,
         audioBase64,
         surveyRecorderBlobType(mediaRecorderRef.current)
       );
       setAudioRecording(false);
-      if (recordedAudio) {
-        setAudioBase64(recordedAudio);
+      if (finalized.dataUrl) {
+        setAudioBase64(finalized.dataUrl);
       }
 
       const token = getStoredToken();
-      const audioUpload = await uploadSurveyAudio(recordedAudio, token);
+      const audioUpload = await uploadSurveyAudio(finalized.blob ?? finalized.dataUrl, token);
 
       const voter = selectedVoter ?? ({} as VoterSuggestion);
       const structuredAnswers = buildStructuredDynamicAnswers({
