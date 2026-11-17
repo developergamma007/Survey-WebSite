@@ -6,6 +6,9 @@ export type SurveyorProfile = {
   display_name: string;
   mobile: string;
   is_admin: boolean;
+  assembly_scope_no?: number | null;
+  assembly_scope_name?: string | null;
+  is_platform_admin?: boolean;
 };
 
 const TOKEN_KEY = "token";
@@ -81,7 +84,7 @@ export async function restoreSurveyorSession(): Promise<SurveyorProfile | null> 
 
 export function isSurveyorAccount(profile: SurveyorProfile | null | undefined): boolean {
   if (!profile) return false;
-  return !isResponsesAdmin(profile.username);
+  return !isResponsesAdmin(profile);
 }
 
 export function surveyorDefaults(profile: SurveyorProfile | null | undefined) {

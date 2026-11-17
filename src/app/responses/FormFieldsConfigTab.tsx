@@ -11,8 +11,11 @@ import {
   VOTER_FIELD_LABELS,
   type SurveyFieldConfig,
 } from "@/lib/surveyFieldConfig";
+import { useAdminDashboardProfile } from "./AdminDashboardContext";
+import { filterAssembliesForAdmin, isAssemblyScopedAdmin, lockedAssemblyNo } from "@/lib/adminAssemblyScope";
 
 export default function FormFieldsConfigTab() {
+  const adminProfile = useAdminDashboardProfile();
   const [config, setConfig] = useState<SurveyFieldConfig>(DEFAULT_SURVEY_FIELD_CONFIG);
   const [assemblies, setAssemblies] = useState<Array<{ assembly_no: number; assembly_name_en: string | null }>>([]);
   const [wards, setWards] = useState<Array<{ id: number; ward_name_en: string }>>([]);
@@ -26,9 +29,19 @@ export default function FormFieldsConfigTab() {
   useEffect(() => {
     axios
       .get<Array<{ assembly_no: number; assembly_name_en: string | null }>>(`${API_BASE_URL}/api/assemblies`)
-      .then((res) => setAssemblies(Array.isArray(res.data) ? res.data : []))
+      .then((res) => {
+        const rows = Array.isArray(res.data) ? res.data : [];
+        setAssemblies(filterAssembliesForAdmin(rows, adminProfile));
+      })
       .catch(() => setAssemblies([]));
-  }, []);
+  }, [adminProfile]);
+
+  useEffect(() => {
+    const lock = lockedAssemblyNo(adminProfile);
+    if (lock != null) {
+      setAssemblyNo(String(lock));
+    }
+  }, [adminProfile]);
 
   useEffect(() => {
     if (!assemblyNo) {
@@ -136,8 +149,15 @@ export default function FormFieldsConfigTab() {
         <div className="grid gap-3 md:grid-cols-2">
           <label className="space-y-1 text-sm font-semibold text-slate-700">
             <span>Assembly</span>
-            <select value={assemblyNo} onChange={(event) => selectAssembly(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-medium text-slate-800">
-              <option value="">Global settings (all assemblies)</option>
+            <select
+              value={assemblyNo}
+              onChange={(event) => selectAssembly(event.target.value)}
+              disabled={isAssemblyScopedAdmin(adminProfile)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-medium text-slate-800"
+            >
+              {!isAssemblyScopedAdmin(adminProfile) ? (
+                <option value="">Global settings (all assemblies)</option>
+              ) : null}
               {assemblies.map((assembly) => (
                 <option key={assembly.assembly_no} value={assembly.assembly_no}>
                   {assembly.assembly_name_en || `Assembly ${assembly.assembly_no}`} ({assembly.assembly_no})

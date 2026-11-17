@@ -5,6 +5,8 @@ import { Plus, Trash2, Save, ChevronRight, Layout, ListPlus, Copy, Check, Downlo
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { API_BASE_URL } from "@/lib/config";
+import { useAdminDashboardProfile } from "./AdminDashboardContext";
+import { filterAssembliesForAdmin, lockedAssemblyNo } from "@/lib/adminAssemblyScope";
 import {
     parseQuestionConfig,
     serializeChoiceQuestion,
@@ -113,6 +115,7 @@ function exportResponsesCsv(rows: SurveyResponseRow[], wardName?: string) {
 }
 
 export default function WardManagementTab({ responses = [] }: Props) {
+    const adminProfile = useAdminDashboardProfile();
     const [assemblies, setAssemblies] = useState<Assembly[]>([]);
     const [selectedAssemblyNo, setSelectedAssemblyNo] = useState<number | null>(null);
     const [isCreatingAssembly, setIsCreatingAssembly] = useState(false);
@@ -128,14 +131,22 @@ export default function WardManagementTab({ responses = [] }: Props) {
 
     useEffect(() => {
         fetchAssemblies();
-    }, []);
+    }, [adminProfile]);
 
     const fetchAssemblies = async () => {
         try {
             const res = await fetch(`${API_BASE_URL}/api/assemblies`);
             const data = await res.json();
             if (res.ok && Array.isArray(data)) {
-                setAssemblies(data);
+                const rows = filterAssembliesForAdmin(data, adminProfile);
+                setAssemblies(rows);
+                const lock = lockedAssemblyNo(adminProfile);
+                if (lock != null && rows.some((row) => row.assembly_no === lock)) {
+                    setSelectedAssemblyNo(lock);
+                    setSelectedWard(null);
+                    setQuestions([]);
+                    void fetchWards(lock);
+                }
             } else {
                 setAssemblies([]);
             }

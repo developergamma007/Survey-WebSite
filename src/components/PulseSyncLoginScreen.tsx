@@ -90,7 +90,7 @@ export default function PulseSyncLoginScreen({
           saveStoredToken(result.token);
           const profile = await fetchSurveyorProfile(result.token);
           saveCachedProfile(profile);
-          router.push(isResponsesAdmin(profile.username) ? "/responses" : returnTo);
+          router.push(isResponsesAdmin(profile) ? "/responses" : returnTo);
           return;
         }
         if (result.detail) lastDetail = String(result.detail);

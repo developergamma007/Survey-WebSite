@@ -31,7 +31,7 @@ function SurveyAudioPortalInner({ surveyId }: { surveyId: number }) {
 
       try {
         const profile = await fetchSurveyorProfile(token);
-        if (!isResponsesAdmin(profile.username)) {
+        if (!isResponsesAdmin(profile)) {
           clearSurveyorSession();
           router.replace(`/login?return=${encodeURIComponent(returnPath)}`);
           return;

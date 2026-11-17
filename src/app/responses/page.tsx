@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2, Users, BarChart3 } from "lucide-react";
+import { LogOut, LayoutDashboard, List, Activity, Vote, Settings2, Users, BarChart3, Shield } from "lucide-react";
+import AdminsTab from "./AdminsTab";
 import AnalyticsCharts from "./AnalyticsCharts";
 import WardManagementTab from "./WardManagementTab";
 import FormFieldsConfigTab from "./FormFieldsConfigTab";
@@ -14,16 +15,18 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { API_BASE_URL } from "@/lib/config";
 import type { SurveyResponseRow } from "@/lib/surveyFieldKeys";
-import { clearSurveyorSession, fetchSurveyorProfile } from "@/lib/surveyorSession";
+import { clearSurveyorSession, fetchSurveyorProfile, saveCachedProfile, type SurveyorProfile } from "@/lib/surveyorSession";
+import { AdminDashboardProvider } from "./AdminDashboardContext";
+import { lockedAssemblyLabel, isAssemblyScopedAdmin } from "@/lib/adminAssemblyScope";
 import { isResponsesAdmin } from "@/lib/adminUsers";
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-type AdminTab = "analytics" | "list" | "questions" | "fields" | "users" | "volunteer-analysis";
+type AdminTab = "analytics" | "list" | "questions" | "fields" | "users" | "admins" | "volunteer-analysis";
 
-const VALID_TABS: AdminTab[] = ["analytics", "list", "questions", "fields", "users", "volunteer-analysis"];
+const VALID_TABS: AdminTab[] = ["analytics", "list", "questions", "fields", "users", "admins", "volunteer-analysis"];
 
 function parseTab(value: string | null): AdminTab {
     if (value && VALID_TABS.includes(value as AdminTab)) {
@@ -39,6 +42,7 @@ function ResponsesPageInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [activeTab, setActiveTab] = useState<AdminTab>(() => parseTab(searchParams.get("tab")));
+    const [adminProfile, setAdminProfile] = useState<SurveyorProfile | null>(null);
 
     useEffect(() => {
         setActiveTab(parseTab(searchParams.get("tab")));
@@ -59,10 +63,12 @@ function ResponsesPageInner() {
         const fetchResponses = async () => {
             try {
                 const profile = await fetchSurveyorProfile(token);
-                if (!isResponsesAdmin(profile.username)) {
+                if (!isResponsesAdmin(profile)) {
                     router.push("/login");
                     return;
                 }
+                saveCachedProfile(profile);
+                setAdminProfile(profile);
 
                 const res = await fetch(`${API_BASE_URL}/api/responses`, {
                     headers: {
@@ -159,6 +165,12 @@ function ResponsesPageInner() {
             </nav>
 
             <main className="ps-content-area w-full py-3">
+                {isAssemblyScopedAdmin(adminProfile) ? (
+                    <div className="mb-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900">
+                        Signed in for assembly: {lockedAssemblyLabel(adminProfile)}
+                    </div>
+                ) : null}
+                <AdminDashboardProvider profile={adminProfile}>
                 <div className="ps-tab-shell">
                     <div className="ps-tab-bar" role="tablist">
                         <button
@@ -208,6 +220,15 @@ function ResponsesPageInner() {
                         </button>
                         <button
                             role="tab"
+                            aria-selected={activeTab === 'admins'}
+                            onClick={() => changeTab("admins")}
+                            className={cn("ps-tab", activeTab === 'admins' && "is-active")}
+                        >
+                            <Shield className="h-3.5 w-3.5" />
+                            Manage Admins
+                        </button>
+                        <button
+                            role="tab"
                             aria-selected={activeTab === 'volunteer-analysis'}
                             onClick={() => changeTab("volunteer-analysis")}
                             className={cn("ps-tab", activeTab === 'volunteer-analysis' && "is-active")}
@@ -234,6 +255,8 @@ function ResponsesPageInner() {
                                     <WardManagementTab responses={responses} />
                                 ) : activeTab === 'users' ? (
                                     <UsersTab />
+                                ) : activeTab === 'admins' ? (
+                                    <AdminsTab />
                                 ) : activeTab === 'volunteer-analysis' ? (
                                     <VolunteerAnalysisTab responses={responses} />
                                 ) : (
@@ -243,6 +266,7 @@ function ResponsesPageInner() {
                         </AnimatePresence>
                     </div>
                 </div>
+                </AdminDashboardProvider>
             </main>
         </div>
     );

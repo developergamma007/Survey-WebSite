@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Download,
@@ -10,7 +10,16 @@ import {
   Users,
 } from "lucide-react";
 import type { SurveyResponseRow } from "@/lib/surveyFieldKeys";
+import {
+  buildWardToAssemblyMap,
+  effectiveAssembly,
+  type AssemblyRef,
+  type WardAssemblyRef,
+} from "@/lib/surveyAssembly";
+import { API_BASE_URL } from "@/lib/config";
 import SurveyCoverageMap, { type SurveyMapPoint } from "./SurveyCoverageMap";
+import { useAdminDashboardProfile } from "./AdminDashboardContext";
+import { isAssemblyScopedAdmin, lockedAssemblyLabel, matchesLockedAssemblyName } from "@/lib/adminAssemblyScope";
 
 type AnalysisView = "surveyor" | "ward";
 type DisplayMode = "table" | "map";
@@ -60,9 +69,9 @@ function formatCoordinate(value: number | null) {
   return typeof value === "number" ? value.toFixed(5) : "-";
 }
 
-function scopeMatches(value: string | null | undefined, scope: string) {
+function scopeMatches(value: string, scope: string) {
   if (scope === ALL_SCOPE) return true;
-  if (scope === UNASSIGNED_SCOPE) return !value?.trim();
+  if (scope === UNASSIGNED_SCOPE) return !value.trim();
   return value === scope;
 }
 
@@ -105,7 +114,7 @@ function createWardRows(rows: SurveyResponseRow[]): AggregateRow[] {
   const aggregated = new Map<string, AggregateRow>();
 
   rows.forEach((row) => {
-    const assembly = normalise(row.assembly, "Unassigned assembly");
+    const assembly = normalise(row.assembly, "Unassigned assembly"); // row already enriched when passed in
     const ward = normalise(row.gba_ward, "Unassigned ward");
     const id = `${assembly}::${ward}`;
     const current = aggregated.get(id) ?? {
@@ -147,37 +156,84 @@ function csvEscape(value: string | number) {
 }
 
 export default function VolunteerAnalysisTab({ responses }: { responses: SurveyResponseRow[] }) {
+  const adminProfile = useAdminDashboardProfile();
   const [assembly, setAssembly] = useState(ALL_SCOPE);
   const [ward, setWard] = useState(ALL_SCOPE);
   const [view, setView] = useState<AnalysisView>("surveyor");
   const [sort, setSort] = useState<SortOption>("responses");
   const [mode, setMode] = useState<DisplayMode>("table");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [wardToAssembly, setWardToAssembly] = useState<Map<string, string>>(() => new Map());
 
-  const assemblies = useMemo(
-    () => Array.from(new Set(responses.map((row) => row.assembly?.trim()).filter(Boolean))) as string[],
-    [responses]
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetch(`${API_BASE_URL}/api/wards`).then((res) => res.json()),
+      fetch(`${API_BASE_URL}/api/assemblies`).then((res) => res.json()),
+    ])
+      .then(([wardsRaw, assembliesRaw]) => {
+        if (!active) return;
+        const wards = Array.isArray(wardsRaw) ? (wardsRaw as WardAssemblyRef[]) : [];
+        const assemblies = Array.isArray(assembliesRaw) ? (assembliesRaw as AssemblyRef[]) : [];
+        setWardToAssembly(buildWardToAssemblyMap(wards, assemblies));
+      })
+      .catch(() => {
+        if (active) setWardToAssembly(new Map());
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const assemblyForRow = useMemo(
+    () => (row: SurveyResponseRow) => effectiveAssembly(row, wardToAssembly),
+    [wardToAssembly]
+  );
+
+  const assemblies = useMemo(() => {
+    const values = Array.from(new Set(responses.map((row) => assemblyForRow(row)).filter(Boolean))).sort();
+    const lockLabel = lockedAssemblyLabel(adminProfile);
+    if (lockLabel) {
+      return values.filter((name) => matchesLockedAssemblyName(name, adminProfile));
+    }
+    return values;
+  }, [responses, assemblyForRow, adminProfile]);
+
+  useEffect(() => {
+    const lockLabel = lockedAssemblyLabel(adminProfile);
+    if (lockLabel) {
+      setAssembly(lockLabel);
+      setWard(ALL_SCOPE);
+    }
+  }, [adminProfile]);
+  const unassignedAssemblyCount = useMemo(
+    () => responses.filter((row) => !assemblyForRow(row)).length,
+    [responses, assemblyForRow]
   );
   const scopedByAssembly = useMemo(
-    () => responses.filter((row) => scopeMatches(row.assembly, assembly)),
-    [responses, assembly, refreshKey]
+    () => responses.filter((row) => scopeMatches(assemblyForRow(row), assembly)),
+    [responses, assembly, assemblyForRow, refreshKey]
   );
   const wards = useMemo(
     () => Array.from(new Set(scopedByAssembly.map((row) => row.gba_ward?.trim()).filter(Boolean))) as string[],
     [scopedByAssembly]
   );
   const filteredResponses = useMemo(
-    () => scopedByAssembly.filter((row) => scopeMatches(row.gba_ward, ward)),
+    () => scopedByAssembly.filter((row) => scopeMatches(row.gba_ward ?? "", ward)),
     [scopedByAssembly, ward]
   );
   const rows = useMemo(() => {
-    const values = view === "surveyor" ? createSurveyorRows(filteredResponses) : createWardRows(filteredResponses);
+    const enriched = filteredResponses.map((row) => ({
+      ...row,
+      assembly: assemblyForRow(row) || row.assembly,
+    }));
+    const values = view === "surveyor" ? createSurveyorRows(enriched) : createWardRows(enriched);
     return values.sort((a, b) => {
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "latest") return new Date(b.latest || 0).getTime() - new Date(a.latest || 0).getTime();
       return b.responses - a.responses || a.name.localeCompare(b.name);
     });
-  }, [filteredResponses, view, sort]);
+  }, [filteredResponses, view, sort, assemblyForRow]);
   const gpsPoints = useMemo(
     () => filteredResponses.filter(isLocationCaptured),
     [filteredResponses]
@@ -186,13 +242,13 @@ export default function VolunteerAnalysisTab({ responses }: { responses: SurveyR
     id: point.id,
     name: normalise(point.interviewer_name, "Unnamed respondent"),
     surveyor: normalise(point.surveyor_name, "Unassigned surveyor"),
-    assembly: normalise(point.assembly, "Unassigned assembly"),
+    assembly: normalise(assemblyForRow(point) || point.assembly, "Unassigned assembly"),
     ward: normalise(point.gba_ward, "Unassigned ward"),
     gender: point.interviewer_gender,
     latitude: point.latitude as number,
     longitude: point.longitude as number,
     submittedAt: point.created_at,
-  })), [gpsPoints]);
+  })), [gpsPoints, assemblyForRow]);
   const summary = useMemo(() => ({
     responses: filteredResponses.length,
     surveyors: new Set(filteredResponses.map((row) => `${normalise(row.surveyor_name, "Unassigned surveyor")}::${normalise(row.surveyor_mobile, "-")}`)).size,
@@ -235,10 +291,23 @@ export default function VolunteerAnalysisTab({ responses }: { responses: SurveyR
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <FilterSelect label="Assembly" value={assembly} onChange={(value) => { setAssembly(value); setWard(ALL_SCOPE); }}>
+          <FilterSelect
+            label="Assembly"
+            value={assembly}
+            disabled={isAssemblyScopedAdmin(adminProfile)}
+            onChange={(value) => { setAssembly(value); setWard(ALL_SCOPE); }}
+          >
+            {!isAssemblyScopedAdmin(adminProfile) ? (
             <option value={ALL_SCOPE}>All Assemblies ({responses.length})</option>
-            {assemblies.sort().map((item) => <option key={item} value={item}>{item} ({responses.filter((row) => row.assembly?.trim() === item).length})</option>)}
-            {responses.some((row) => !row.assembly?.trim()) && <option value={UNASSIGNED_SCOPE}>Unassigned Assembly</option>}
+            ) : null}
+            {assemblies.map((item) => (
+              <option key={item} value={item}>
+                {item} ({responses.filter((row) => assemblyForRow(row) === item).length})
+              </option>
+            ))}
+            {unassignedAssemblyCount > 0 && (
+              <option value={UNASSIGNED_SCOPE}>Unassigned Assembly ({unassignedAssemblyCount})</option>
+            )}
           </FilterSelect>
           <FilterSelect label="Ward" value={ward} onChange={setWard} disabled={!wards.length && !scopedByAssembly.some((row) => !row.gba_ward?.trim())}>
             <option value={ALL_SCOPE}>All Wards ({scopedByAssembly.length})</option>

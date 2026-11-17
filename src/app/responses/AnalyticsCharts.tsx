@@ -24,6 +24,18 @@ import {
     type DistributionSlice,
 } from "@/lib/surveyAnalytics";
 import { parseQuestionConfig } from "@/lib/surveyText";
+import {
+    buildWardToAssemblyMap,
+    effectiveAssembly,
+    type AssemblyRef,
+    type WardAssemblyRef,
+} from "@/lib/surveyAssembly";
+import { useAdminDashboardProfile } from "./AdminDashboardContext";
+import {
+    isAssemblyScopedAdmin,
+    lockedAssemblyLabel,
+    matchesLockedAssemblyName,
+} from "@/lib/adminAssemblyScope";
 
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 const ALL_SCOPE = "all";
@@ -45,31 +57,70 @@ const itemVariants = {
 type WardQuestion = { id: number; text: string; options: string };
 
 export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] }) {
+    const adminProfile = useAdminDashboardProfile();
     const [selectedAssembly, setSelectedAssembly] = useState(ALL_SCOPE);
     const [selectedWard, setSelectedWard] = useState(ALL_SCOPE);
     const [wardQuestions, setWardQuestions] = useState<WardQuestion[]>([]);
     const [loadingQuestions, setLoadingQuestions] = useState(false);
+    const [wardToAssembly, setWardToAssembly] = useState<Map<string, string>>(() => new Map());
+
+    useEffect(() => {
+        let active = true;
+        Promise.all([
+            fetch(`${API_BASE_URL}/api/wards`).then((res) => res.json()),
+            fetch(`${API_BASE_URL}/api/assemblies`).then((res) => res.json()),
+        ])
+            .then(([wardsRaw, assembliesRaw]) => {
+                if (!active) return;
+                const wards = Array.isArray(wardsRaw) ? (wardsRaw as WardAssemblyRef[]) : [];
+                const assemblies = Array.isArray(assembliesRaw) ? (assembliesRaw as AssemblyRef[]) : [];
+                setWardToAssembly(buildWardToAssemblyMap(wards, assemblies));
+            })
+            .catch(() => {
+                if (active) setWardToAssembly(new Map());
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const assemblyForRow = useMemo(
+        () => (row: SurveyResponseRow) => effectiveAssembly(row, wardToAssembly),
+        [wardToAssembly]
+    );
 
     const assemblies = useMemo(() => {
-        const values = Array.from(new Set(data.map((row) => row.assembly?.trim()).filter(Boolean))) as string[];
-        return values.sort();
-    }, [data]);
+        const values = Array.from(new Set(data.map((row) => assemblyForRow(row)).filter(Boolean)));
+        const sorted = values.sort();
+        const lockLabel = lockedAssemblyLabel(adminProfile);
+        if (lockLabel) {
+            return sorted.filter((name) => matchesLockedAssemblyName(name, adminProfile));
+        }
+        return sorted;
+    }, [data, assemblyForRow, adminProfile]);
+
+    useEffect(() => {
+        const lockLabel = lockedAssemblyLabel(adminProfile);
+        if (lockLabel) {
+            setSelectedAssembly(lockLabel);
+            setSelectedWard(ALL_SCOPE);
+        }
+    }, [adminProfile]);
 
     const unassignedAssemblyCount = useMemo(
-        () => data.filter((row) => !row.assembly?.trim()).length,
-        [data]
+        () => data.filter((row) => !assemblyForRow(row)).length,
+        [data, assemblyForRow]
     );
 
     const assemblyScopedData = useMemo(
         () =>
-            data.filter((row) =>
-                selectedAssembly === ALL_SCOPE
-                    ? true
-                    : selectedAssembly === UNASSIGNED_SCOPE
-                      ? !row.assembly?.trim()
-                      : row.assembly === selectedAssembly
-            ),
-        [data, selectedAssembly]
+            data.filter((row) => {
+                const asm = assemblyForRow(row);
+                if (selectedAssembly === ALL_SCOPE) return true;
+                if (selectedAssembly === UNASSIGNED_SCOPE) return !asm;
+                return asm === selectedAssembly;
+            }),
+        [data, selectedAssembly, assemblyForRow]
     );
 
     const wards = useMemo(() => {
@@ -192,16 +243,19 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] })
                     <select
                         id="analytics-assembly"
                         value={selectedAssembly}
+                        disabled={isAssemblyScopedAdmin(adminProfile)}
                         onChange={(event) => {
                             setSelectedAssembly(event.target.value);
                             setSelectedWard(ALL_SCOPE);
                         }}
                         className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                     >
+                        {!isAssemblyScopedAdmin(adminProfile) ? (
                         <option value={ALL_SCOPE}>All Assemblies ({data.length})</option>
+                        ) : null}
                         {assemblies.map((assembly) => (
                             <option key={assembly} value={assembly}>
-                                {assembly} ({data.filter((row) => row.assembly === assembly).length})
+                                {assembly} ({data.filter((row) => assemblyForRow(row) === assembly).length})
                             </option>
                         ))}
                         {unassignedAssemblyCount > 0 && (
