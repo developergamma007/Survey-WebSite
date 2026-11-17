@@ -404,6 +404,24 @@
   color: #94a3b8;
 }
 
+.ps-multi-filter-checkbox {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1.5px solid #cbd5e1;
+  background: #fff;
+  color: #4338ca;
+}
+
+.ps-ward-filter-option.is-selected .ps-multi-filter-checkbox {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
 .ps-users-tab {
   display: flex;
   flex-direction: column;

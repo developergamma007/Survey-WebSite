@@ -20,6 +20,13 @@ import { API_BASE_URL } from "@/lib/config";
 import SurveyCoverageMap, { type SurveyMapPoint } from "./SurveyCoverageMap";
 import { useAdminDashboardProfile } from "./AdminDashboardContext";
 import { isAssemblyScopedAdmin, lockedAssemblyLabel, matchesLockedAssemblyName } from "@/lib/adminAssemblyScope";
+import MultiFilterSelect from "./MultiFilterSelect";
+import {
+  UNASSIGNED_ASSEMBLY_SCOPE,
+  UNASSIGNED_WARD_SCOPE,
+  filterRowsByAssemblySelection,
+  filterRowsByWardSelection,
+} from "@/lib/multiScopeFilter";
 
 type AnalysisView = "surveyor" | "ward";
 type DisplayMode = "table" | "map";
@@ -40,9 +47,6 @@ type AggregateRow = {
   latest: string | null;
   points: SurveyResponseRow[];
 };
-
-const ALL_SCOPE = "__all__";
-const UNASSIGNED_SCOPE = "__unassigned__";
 
 function normalise(value: string | null | undefined, fallback: string) {
   return value?.trim() || fallback;
@@ -67,12 +71,6 @@ function formatDate(value: string | null) {
 
 function formatCoordinate(value: number | null) {
   return typeof value === "number" ? value.toFixed(5) : "-";
-}
-
-function scopeMatches(value: string, scope: string) {
-  if (scope === ALL_SCOPE) return true;
-  if (scope === UNASSIGNED_SCOPE) return !value.trim();
-  return value === scope;
 }
 
 function createSurveyorRows(rows: SurveyResponseRow[]): AggregateRow[] {
@@ -157,8 +155,8 @@ function csvEscape(value: string | number) {
 
 export default function VolunteerAnalysisTab({ responses }: { responses: SurveyResponseRow[] }) {
   const adminProfile = useAdminDashboardProfile();
-  const [assembly, setAssembly] = useState(ALL_SCOPE);
-  const [ward, setWard] = useState(ALL_SCOPE);
+  const [selectedAssemblies, setSelectedAssemblies] = useState<string[]>([]);
+  const [selectedWards, setSelectedWards] = useState<string[]>([]);
   const [view, setView] = useState<AnalysisView>("surveyor");
   const [sort, setSort] = useState<SortOption>("responses");
   const [mode, setMode] = useState<DisplayMode>("table");
@@ -202,8 +200,8 @@ export default function VolunteerAnalysisTab({ responses }: { responses: SurveyR
   useEffect(() => {
     const lockLabel = lockedAssemblyLabel(adminProfile);
     if (lockLabel) {
-      setAssembly(lockLabel);
-      setWard(ALL_SCOPE);
+      setSelectedAssemblies([lockLabel]);
+      setSelectedWards([]);
     }
   }, [adminProfile]);
   const unassignedAssemblyCount = useMemo(
@@ -211,17 +209,41 @@ export default function VolunteerAnalysisTab({ responses }: { responses: SurveyR
     [responses, assemblyForRow]
   );
   const scopedByAssembly = useMemo(
-    () => responses.filter((row) => scopeMatches(assemblyForRow(row), assembly)),
-    [responses, assembly, assemblyForRow, refreshKey]
+    () =>
+      filterRowsByAssemblySelection(responses, selectedAssemblies, (row) => assemblyForRow(row) || ""),
+    [responses, selectedAssemblies, assemblyForRow, refreshKey],
   );
   const wards = useMemo(
-    () => Array.from(new Set(scopedByAssembly.map((row) => row.gba_ward?.trim()).filter(Boolean))) as string[],
-    [scopedByAssembly]
+    () =>
+      (Array.from(new Set(scopedByAssembly.map((row) => row.gba_ward?.trim()).filter(Boolean))) as string[]).sort(),
+    [scopedByAssembly],
+  );
+  const unassignedWardCount = useMemo(
+    () => scopedByAssembly.filter((row) => !row.gba_ward?.trim()).length,
+    [scopedByAssembly],
   );
   const filteredResponses = useMemo(
-    () => scopedByAssembly.filter((row) => scopeMatches(row.gba_ward ?? "", ward)),
-    [scopedByAssembly, ward]
+  () => filterRowsByWardSelection(scopedByAssembly, selectedWards, (row) => row.gba_ward ?? ""),
+  [scopedByAssembly, selectedWards],
   );
+  const assemblyOptions = useMemo(
+    () =>
+      assemblies.map((item) => ({
+        value: item,
+        label: `${item} (${responses.filter((row) => assemblyForRow(row) === item).length})`,
+      })),
+    [assemblies, responses, assemblyForRow],
+  );
+  const wardOptions = useMemo(() => {
+    const options = wards.map((item) => ({
+      value: item,
+      label: `${item} (${scopedByAssembly.filter((row) => row.gba_ward?.trim() === item).length})`,
+    }));
+    if (unassignedWardCount > 0) {
+      options.push({ value: UNASSIGNED_WARD_SCOPE, label: `Unassigned Ward (${unassignedWardCount})` });
+    }
+    return options;
+  }, [wards, scopedByAssembly, unassignedWardCount]);
   const rows = useMemo(() => {
     const enriched = filteredResponses.map((row) => ({
       ...row,
@@ -291,29 +313,38 @@ export default function VolunteerAnalysisTab({ responses }: { responses: SurveyR
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <FilterSelect
-            label="Assembly"
-            value={assembly}
-            disabled={isAssemblyScopedAdmin(adminProfile)}
-            onChange={(value) => { setAssembly(value); setWard(ALL_SCOPE); }}
-          >
-            {!isAssemblyScopedAdmin(adminProfile) ? (
-            <option value={ALL_SCOPE}>All Assemblies ({responses.length})</option>
-            ) : null}
-            {assemblies.map((item) => (
-              <option key={item} value={item}>
-                {item} ({responses.filter((row) => assemblyForRow(row) === item).length})
-              </option>
-            ))}
-            {unassignedAssemblyCount > 0 && (
-              <option value={UNASSIGNED_SCOPE}>Unassigned Assembly ({unassignedAssemblyCount})</option>
-            )}
-          </FilterSelect>
-          <FilterSelect label="Ward" value={ward} onChange={setWard} disabled={!wards.length && !scopedByAssembly.some((row) => !row.gba_ward?.trim())}>
-            <option value={ALL_SCOPE}>All Wards ({scopedByAssembly.length})</option>
-            {wards.sort().map((item) => <option key={item} value={item}>{item} ({scopedByAssembly.filter((row) => row.gba_ward?.trim() === item).length})</option>)}
-            {scopedByAssembly.some((row) => !row.gba_ward?.trim()) && <option value={UNASSIGNED_SCOPE}>Unassigned Ward</option>}
-          </FilterSelect>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Assembly</span>
+            <MultiFilterSelect
+              options={[
+                ...assemblyOptions,
+                ...(unassignedAssemblyCount > 0
+                  ? [{ value: UNASSIGNED_ASSEMBLY_SCOPE, label: `Unassigned Assembly (${unassignedAssemblyCount})` }]
+                  : []),
+              ]}
+              selection={selectedAssemblies}
+              onChange={(next) => {
+                setSelectedAssemblies(next);
+                setSelectedWards([]);
+              }}
+              allLabel={`All Assemblies (${responses.length})`}
+              disabled={isAssemblyScopedAdmin(adminProfile)}
+              className="w-full"
+              searchPlaceholder="Search assemblies…"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Ward</span>
+            <MultiFilterSelect
+              options={wardOptions}
+              selection={selectedWards}
+              onChange={setSelectedWards}
+              allLabel={`All Wards (${scopedByAssembly.length})`}
+              disabled={wardOptions.length === 0}
+              className="w-full"
+              searchPlaceholder="Search wards…"
+            />
+          </label>
           <FilterSelect label="View" value={view} onChange={(value) => setView(value as AnalysisView)}>
             <option value="surveyor">Surveyor wise</option>
             <option value="ward">Ward wise</option>

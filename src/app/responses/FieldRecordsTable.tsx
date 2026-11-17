@@ -14,6 +14,16 @@ import {
 } from "@/lib/surveyFieldKeys";
 import { exportRecordsExcel } from "@/lib/surveyAudioExport";
 import { questionAnswerKey, questionColumnLabel } from "@/lib/surveyText";
+import { canViewFieldRecordAudio } from "@/lib/adminUsers";
+import { useAdminDashboardProfile } from "./AdminDashboardContext";
+import {
+  FIELD_RECORDS_UNASSIGNED_ASSEMBLY,
+  FIELD_RECORDS_UNASSIGNED_WARD,
+  countUnassignedAssembly,
+  countUnassignedWard,
+  filterFieldRecordsByWards,
+  singleFieldRecordsRealWard,
+} from "@/lib/fieldRecordsFilter";
 
 const ROWS_PER_BATCH = 40;
 
@@ -103,8 +113,10 @@ function RecordCell({
 }
 
 export default function FieldRecordsTable({ responses }: Props) {
+  const adminProfile = useAdminDashboardProfile();
+  const showAudio = canViewFieldRecordAudio(adminProfile);
   const [wards, setWards] = useState<Ward[]>([]);
-  const [selectedWard, setSelectedWard] = useState<string>("");
+  const [selectedWards, setSelectedWards] = useState<string[]>([]);
   const [wardQuestions, setWardQuestions] = useState<WardQuestion[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [visibleCount, setVisibleCount] = useState(ROWS_PER_BATCH);
@@ -121,24 +133,29 @@ export default function FieldRecordsTable({ responses }: Props) {
       .catch(() => setWards([]));
   }, []);
 
+  const unassignedAssemblyCount = useMemo(() => countUnassignedAssembly(responses), [responses]);
+  const unassignedWardCount = useMemo(() => countUnassignedWard(responses), [responses]);
+
+  const singleWardForQuestions = singleFieldRecordsRealWard(selectedWards);
+
   useEffect(() => {
-    if (!selectedWard) {
+    if (!singleWardForQuestions) {
       setWardQuestions([]);
       return;
     }
 
     setLoadingQuestions(true);
-    fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(selectedWard)}/questions`)
+    fetch(`${API_BASE_URL}/api/wards/${encodeURIComponent(singleWardForQuestions)}/questions`)
       .then((res) => res.json())
       .then((data) => {
         setWardQuestions(Array.isArray(data) ? data : []);
       })
       .catch(() => setWardQuestions([]))
       .finally(() => setLoadingQuestions(false));
-  }, [selectedWard]);
+  }, [singleWardForQuestions]);
 
   const dynamicColumns: RecordColumn[] = useMemo(() => {
-    if (!selectedWard) return [];
+    if (!singleWardForQuestions) return [];
     return wardQuestions.map((question) => {
       const key = questionAnswerKey(question.text);
       return {
@@ -148,17 +165,25 @@ export default function FieldRecordsTable({ responses }: Props) {
         legacyKeys: key !== question.text ? [question.text] : [],
       };
     });
-  }, [selectedWard, wardQuestions]);
+  }, [singleWardForQuestions, wardQuestions]);
 
-  const visibleColumns = useMemo(
-    () => [...BASE_RECORD_COLUMNS, ...dynamicColumns],
-    [dynamicColumns]
+  const baseColumns = useMemo(
+    () =>
+      showAudio
+        ? BASE_RECORD_COLUMNS
+        : BASE_RECORD_COLUMNS.filter((col) => col.key !== "audio"),
+    [showAudio],
   );
 
-  const filteredRows = useMemo(() => {
-    if (!selectedWard) return responses;
-    return responses.filter((row) => row.gba_ward === selectedWard);
-  }, [responses, selectedWard]);
+  const visibleColumns = useMemo(
+    () => [...baseColumns, ...dynamicColumns],
+    [baseColumns, dynamicColumns],
+  );
+
+  const filteredRows = useMemo(
+    () => filterFieldRecordsByWards(responses, selectedWards),
+    [responses, selectedWards],
+  );
 
   const visibleRows = useMemo(
     () => filteredRows.slice(0, visibleCount),
@@ -170,7 +195,7 @@ export default function FieldRecordsTable({ responses }: Props) {
   useEffect(() => {
     setVisibleCount(ROWS_PER_BATCH);
     scrollRef.current?.scrollTo({ top: 0 });
-  }, [selectedWard, filteredRows.length]);
+  }, [selectedWards, filteredRows.length]);
 
   const loadMore = useCallback(() => {
     setVisibleCount((prev) => Math.min(prev + ROWS_PER_BATCH, filteredRows.length));
@@ -193,7 +218,16 @@ export default function FieldRecordsTable({ responses }: Props) {
   }, [hasMore, loadMore, visibleRows.length]);
 
   const handleExport = async () => {
-    const slug = selectedWard ? selectedWard.replace(/\s+/g, "-") : "all-wards";
+    const slug =
+      selectedWards.length === 0
+        ? "all-wards"
+        : selectedWards.length === 1
+          ? selectedWards[0] === FIELD_RECORDS_UNASSIGNED_ASSEMBLY
+            ? "unassigned-assembly"
+            : selectedWards[0] === FIELD_RECORDS_UNASSIGNED_WARD
+              ? "unassigned-ward"
+              : selectedWards[0].replace(/\s+/g, "-")
+          : `${selectedWards.length}-wards`;
     await exportRecordsExcel(filteredRows, visibleColumns, `field-records-${slug}.xlsx`);
   };
 
@@ -204,10 +238,13 @@ export default function FieldRecordsTable({ responses }: Props) {
           <span className="ps-field-records-label">Ward</span>
           <WardFilterSelect
             wards={wards}
-            value={selectedWard}
-            onChange={setSelectedWard}
+            selection={selectedWards}
+            onChange={setSelectedWards}
+            unassignedAssemblyCount={unassignedAssemblyCount}
+            unassignedWardCount={unassignedWardCount}
+            totalCount={responses.length}
           />
-          {loadingQuestions && selectedWard ? (
+          {loadingQuestions && singleWardForQuestions ? (
             <span className="ps-field-records-meta">Loading columns…</span>
           ) : null}
         </div>
@@ -218,9 +255,15 @@ export default function FieldRecordsTable({ responses }: Props) {
       </div>
 
       <p className="ps-field-records-meta">
-        {selectedWard
-          ? `${selectedWard} — ${dynamicColumns.length} ward question column(s). Showing ${visibleRows.length} of ${filteredRows.length} rows.`
-          : `All wards — ${visibleRows.length} of ${filteredRows.length} rows loaded. Select a ward for question columns.`}
+        {selectedWards.length === 1 && selectedWards[0] === FIELD_RECORDS_UNASSIGNED_ASSEMBLY
+          ? `Unassigned assembly — ${visibleRows.length} of ${filteredRows.length} rows (empty assembly on record).`
+          : selectedWards.length === 1 && selectedWards[0] === FIELD_RECORDS_UNASSIGNED_WARD
+            ? `Unassigned ward — ${visibleRows.length} of ${filteredRows.length} rows (empty village / ward).`
+            : singleWardForQuestions
+              ? `${singleWardForQuestions} — ${dynamicColumns.length} ward question column(s). Showing ${visibleRows.length} of ${filteredRows.length} rows.`
+              : selectedWards.length === 0
+                ? `All wards — ${visibleRows.length} of ${filteredRows.length} rows loaded. Select one ward for question columns.`
+                : `${selectedWards.length} wards — ${visibleRows.length} of ${filteredRows.length} rows. Select exactly one ward for question columns.`}
       </p>
 
       <div className="ps-field-records-table-shell">

@@ -36,10 +36,16 @@ import {
     lockedAssemblyLabel,
     matchesLockedAssemblyName,
 } from "@/lib/adminAssemblyScope";
+import MultiFilterSelect from "./MultiFilterSelect";
+import {
+    UNASSIGNED_ASSEMBLY_SCOPE,
+    UNASSIGNED_WARD_SCOPE,
+    filterRowsByAssemblySelection,
+    filterRowsByWardSelection,
+    scopeFilterLabel,
+} from "@/lib/multiScopeFilter";
 
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
-const ALL_SCOPE = "all";
-const UNASSIGNED_SCOPE = "__unassigned__";
 
 const containerVariants = {
     hidden: { opacity: 0 },
@@ -58,8 +64,8 @@ type WardQuestion = { id: number; text: string; options: string };
 
 export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] }) {
     const adminProfile = useAdminDashboardProfile();
-    const [selectedAssembly, setSelectedAssembly] = useState(ALL_SCOPE);
-    const [selectedWard, setSelectedWard] = useState(ALL_SCOPE);
+    const [selectedAssemblies, setSelectedAssemblies] = useState<string[]>([]);
+    const [selectedWards, setSelectedWards] = useState<string[]>([]);
     const [wardQuestions, setWardQuestions] = useState<WardQuestion[]>([]);
     const [loadingQuestions, setLoadingQuestions] = useState(false);
     const [wardToAssembly, setWardToAssembly] = useState<Map<string, string>>(() => new Map());
@@ -102,8 +108,8 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] })
     useEffect(() => {
         const lockLabel = lockedAssemblyLabel(adminProfile);
         if (lockLabel) {
-            setSelectedAssembly(lockLabel);
-            setSelectedWard(ALL_SCOPE);
+            setSelectedAssemblies([lockLabel]);
+            setSelectedWards([]);
         }
     }, [adminProfile]);
 
@@ -113,14 +119,8 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] })
     );
 
     const assemblyScopedData = useMemo(
-        () =>
-            data.filter((row) => {
-                const asm = assemblyForRow(row);
-                if (selectedAssembly === ALL_SCOPE) return true;
-                if (selectedAssembly === UNASSIGNED_SCOPE) return !asm;
-                return asm === selectedAssembly;
-            }),
-        [data, selectedAssembly, assemblyForRow]
+        () => filterRowsByAssemblySelection(data, selectedAssemblies, (row) => assemblyForRow(row) || ""),
+        [data, selectedAssemblies, assemblyForRow],
     );
 
     const wards = useMemo(() => {
@@ -135,29 +135,42 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] })
 
     const filteredData = useMemo(
         () =>
-            assemblyScopedData.filter((row) =>
-                selectedWard === ALL_SCOPE
-                    ? true
-                    : selectedWard === UNASSIGNED_SCOPE
-                      ? !row.gba_ward?.trim()
-                      : row.gba_ward === selectedWard
-            ),
-        [assemblyScopedData, selectedWard]
+            filterRowsByWardSelection(assemblyScopedData, selectedWards, (row) => row.gba_ward ?? ""),
+        [assemblyScopedData, selectedWards],
     );
 
+    const assemblyOptions = useMemo(
+        () =>
+            assemblies.map((assembly) => ({
+                value: assembly,
+                label: `${assembly} (${data.filter((row) => assemblyForRow(row) === assembly).length})`,
+            })),
+        [assemblies, data, assemblyForRow],
+    );
+
+    const wardOptions = useMemo(() => {
+        const options = wards.map((ward) => ({
+            value: ward,
+            label: `${ward} (${assemblyScopedData.filter((row) => row.gba_ward === ward).length})`,
+        }));
+        if (unassignedWardCount > 0) {
+            options.push({
+                value: UNASSIGNED_WARD_SCOPE,
+                label: `Unassigned Ward (${unassignedWardCount})`,
+            });
+        }
+        return options;
+    }, [wards, assemblyScopedData, unassignedWardCount]);
+
     const selectedScopeLabel =
-        selectedWard !== ALL_SCOPE
-            ? selectedWard === UNASSIGNED_SCOPE
-                ? "Unassigned Ward"
-                : `Ward: ${selectedWard}`
-            : selectedAssembly !== ALL_SCOPE
-              ? selectedAssembly === UNASSIGNED_SCOPE
-                  ? "Unassigned Assembly"
-                  : `Assembly: ${selectedAssembly}`
+        selectedWards.length > 0
+            ? scopeFilterLabel(selectedWards, "All Wards", wardOptions)
+            : selectedAssemblies.length > 0
+              ? scopeFilterLabel(selectedAssemblies, "All Assemblies", assemblyOptions)
               : "All Assemblies";
 
     const wardForQuestions =
-        selectedWard !== ALL_SCOPE && selectedWard !== UNASSIGNED_SCOPE ? selectedWard : "";
+        selectedWards.length === 1 && selectedWards[0] !== UNASSIGNED_WARD_SCOPE ? selectedWards[0] : "";
 
     useEffect(() => {
         if (!wardForQuestions) {
@@ -237,51 +250,37 @@ export default function AnalyticsCharts({ data }: { data: SurveyResponseRow[] })
                     </div>
                 </div>
                 <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-                    <label className="sr-only" htmlFor="analytics-assembly">
-                        Filter insights by assembly
-                    </label>
-                    <select
-                        id="analytics-assembly"
-                        value={selectedAssembly}
-                        disabled={isAssemblyScopedAdmin(adminProfile)}
-                        onChange={(event) => {
-                            setSelectedAssembly(event.target.value);
-                            setSelectedWard(ALL_SCOPE);
+                    <MultiFilterSelect
+                        options={[
+                            ...assemblyOptions,
+                            ...(unassignedAssemblyCount > 0
+                                ? [
+                                      {
+                                          value: UNASSIGNED_ASSEMBLY_SCOPE,
+                                          label: `Unassigned Assembly (${unassignedAssemblyCount})`,
+                                      },
+                                  ]
+                                : []),
+                        ]}
+                        selection={selectedAssemblies}
+                        onChange={(next) => {
+                            setSelectedAssemblies(next);
+                            setSelectedWards([]);
                         }}
-                        className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                    >
-                        {!isAssemblyScopedAdmin(adminProfile) ? (
-                        <option value={ALL_SCOPE}>All Assemblies ({data.length})</option>
-                        ) : null}
-                        {assemblies.map((assembly) => (
-                            <option key={assembly} value={assembly}>
-                                {assembly} ({data.filter((row) => assemblyForRow(row) === assembly).length})
-                            </option>
-                        ))}
-                        {unassignedAssemblyCount > 0 && (
-                            <option value={UNASSIGNED_SCOPE}>Unassigned Assembly ({unassignedAssemblyCount})</option>
-                        )}
-                    </select>
-                    <label className="sr-only" htmlFor="analytics-ward">
-                        Filter insights by ward
-                    </label>
-                    <select
-                        id="analytics-ward"
-                        value={selectedWard}
-                        onChange={(event) => setSelectedWard(event.target.value)}
-                        className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={wards.length === 0 && unassignedWardCount === 0}
-                    >
-                        <option value={ALL_SCOPE}>All Wards ({assemblyScopedData.length})</option>
-                        {wards.map((ward) => (
-                            <option key={ward} value={ward}>
-                                {ward} ({assemblyScopedData.filter((row) => row.gba_ward === ward).length})
-                            </option>
-                        ))}
-                        {unassignedWardCount > 0 && (
-                            <option value={UNASSIGNED_SCOPE}>Unassigned Ward ({unassignedWardCount})</option>
-                        )}
-                    </select>
+                        allLabel={`All Assemblies (${data.length})`}
+                        disabled={isAssemblyScopedAdmin(adminProfile)}
+                        className="w-full min-w-[200px]"
+                        searchPlaceholder="Search assemblies…"
+                    />
+                    <MultiFilterSelect
+                        options={wardOptions}
+                        selection={selectedWards}
+                        onChange={setSelectedWards}
+                        allLabel={`All Wards (${assemblyScopedData.length})`}
+                        disabled={wardOptions.length === 0}
+                        className="w-full min-w-[200px]"
+                        searchPlaceholder="Search wards…"
+                    />
                 </div>
             </motion.div>
 

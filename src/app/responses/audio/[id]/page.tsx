@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/config";
 import { fetchSurveyorProfile, getStoredToken, clearSurveyorSession } from "@/lib/surveyorSession";
-import { isResponsesAdmin } from "@/lib/adminUsers";
+import { canViewFieldRecordAudio } from "@/lib/adminUsers";
 
 function SurveyAudioPortalInner({ surveyId }: { surveyId: number }) {
   const router = useRouter();
@@ -31,7 +31,7 @@ function SurveyAudioPortalInner({ surveyId }: { surveyId: number }) {
 
       try {
         const profile = await fetchSurveyorProfile(token);
-        if (!isResponsesAdmin(profile)) {
+        if (!canViewFieldRecordAudio(profile)) {
           clearSurveyorSession();
           router.replace(`/login?return=${encodeURIComponent(returnPath)}`);
           return;

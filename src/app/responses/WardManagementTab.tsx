@@ -7,6 +7,7 @@ import { twMerge } from "tailwind-merge";
 import { API_BASE_URL } from "@/lib/config";
 import { useAdminDashboardProfile } from "./AdminDashboardContext";
 import { filterAssembliesForAdmin, lockedAssemblyNo } from "@/lib/adminAssemblyScope";
+import MultiFilterSelect from "./MultiFilterSelect";
 import {
     parseQuestionConfig,
     serializeChoiceQuestion,
@@ -117,7 +118,7 @@ function exportResponsesCsv(rows: SurveyResponseRow[], wardName?: string) {
 export default function WardManagementTab({ responses = [] }: Props) {
     const adminProfile = useAdminDashboardProfile();
     const [assemblies, setAssemblies] = useState<Assembly[]>([]);
-    const [selectedAssemblyNo, setSelectedAssemblyNo] = useState<number | null>(null);
+    const [selectedAssemblyNos, setSelectedAssemblyNos] = useState<string[]>([]);
     const [isCreatingAssembly, setIsCreatingAssembly] = useState(false);
     const [wards, setWards] = useState<Ward[]>([]);
     const [selectedWard, setSelectedWard] = useState<Ward | null>(null);
@@ -133,6 +134,11 @@ export default function WardManagementTab({ responses = [] }: Props) {
         fetchAssemblies();
     }, [adminProfile]);
 
+    useEffect(() => {
+        if (assemblies.length === 0) return;
+        void fetchWardsForSelection(selectedAssemblyNos);
+    }, [assemblies, selectedAssemblyNos, adminProfile]);
+
     const fetchAssemblies = async () => {
         try {
             const res = await fetch(`${API_BASE_URL}/api/assemblies`);
@@ -142,10 +148,11 @@ export default function WardManagementTab({ responses = [] }: Props) {
                 setAssemblies(rows);
                 const lock = lockedAssemblyNo(adminProfile);
                 if (lock != null && rows.some((row) => row.assembly_no === lock)) {
-                    setSelectedAssemblyNo(lock);
+                    const lockKey = String(lock);
+                    setSelectedAssemblyNos([lockKey]);
                     setSelectedWard(null);
                     setQuestions([]);
-                    void fetchWards(lock);
+                    void fetchWardsForSelection([lockKey]);
                 }
             } else {
                 setAssemblies([]);
@@ -166,13 +173,51 @@ export default function WardManagementTab({ responses = [] }: Props) {
         }
     };
 
+    const fetchWardsForSelection = async (selection: string[]) => {
+        try {
+            if (selection.length === 0) {
+                const res = await fetch(`${API_BASE_URL}/api/wards`);
+                const data = await res.json();
+                let rows = res.ok && Array.isArray(data) ? (data as Ward[]) : [];
+                const lock = lockedAssemblyNo(adminProfile);
+                if (lock != null) {
+                    rows = rows.filter((w) => w.assembly_no === lock);
+                }
+                setWards(rows.sort((a, b) => a.ward_name_en.localeCompare(b.ward_name_en)));
+                return;
+            }
+            const results = await Promise.all(
+                selection.map((key) =>
+                    fetch(`${API_BASE_URL}/api/wards?assembly_no=${encodeURIComponent(key)}`).then((res) =>
+                        res.json(),
+                    ),
+                ),
+            );
+            const merged = new Map<number, Ward>();
+            for (const batch of results) {
+                if (!Array.isArray(batch)) continue;
+                for (const ward of batch as Ward[]) {
+                    merged.set(ward.id, ward);
+                }
+            }
+            setWards(Array.from(merged.values()).sort((a, b) => a.ward_name_en.localeCompare(b.ward_name_en)));
+        } catch (err) {
+            console.error("Failed to fetch wards", err);
+            setWards([]);
+        }
+    };
+
     const selectAssembly = (assemblyNo: number) => {
-        setSelectedAssemblyNo(assemblyNo);
+        const key = String(assemblyNo);
+        setSelectedAssemblyNos([key]);
         setSelectedWard(null);
         setQuestions([]);
         setMessage(null);
-        void fetchWards(assemblyNo);
+        void fetchWardsForSelection([key]);
     };
+
+    const soleSelectedAssemblyNo =
+        selectedAssemblyNos.length === 1 ? Number(selectedAssemblyNos[0]) : null;
 
     const createAssembly = async () => {
         const assemblyNo = Number(newAssemblyNo);
@@ -221,19 +266,19 @@ export default function WardManagementTab({ responses = [] }: Props) {
     };
 
     const createWard = async () => {
-        if (!newWardName.trim() || selectedAssemblyNo === null) {
-            setMessage("Select an assembly before creating a ward.");
+        if (!newWardName.trim() || soleSelectedAssemblyNo == null) {
+            setMessage("Select exactly one assembly before creating a ward.");
             return;
         }
         try {
             const res = await fetch(`${API_BASE_URL}/api/wards`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ward_name_en: newWardName.trim(), assembly_no: selectedAssemblyNo }),
+                body: JSON.stringify({ ward_name_en: newWardName.trim(), assembly_no: soleSelectedAssemblyNo }),
             });
             if (res.ok) {
                 setNewWardName("");
-                fetchWards(selectedAssemblyNo);
+                void fetchWardsForSelection(selectedAssemblyNos);
                 setMessage("Ward created successfully.");
             } else {
                 const data = await res.json();
@@ -363,41 +408,34 @@ export default function WardManagementTab({ responses = [] }: Props) {
 
                     <div className="space-y-2 border-b border-slate-100 pb-3">
                         <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Select existing assembly</label>
-                        <select
-                            value={isCreatingAssembly ? "create" : selectedAssemblyNo ?? ""}
-                            onChange={(event) => {
-                                const selection = event.target.value;
-                                if (selection === "create") {
-                                    setIsCreatingAssembly(true);
-                                    setSelectedAssemblyNo(null);
-                                    setSelectedWard(null);
-                                    setWards([]);
-                                    setQuestions([]);
-                                    setMessage(null);
-                                    return;
-                                }
-                                const value = Number(selection);
-                                if (value) {
-                                    setIsCreatingAssembly(false);
-                                    selectAssembly(value);
-                                } else {
-                                    setIsCreatingAssembly(false);
-                                    setSelectedAssemblyNo(null);
-                                    setSelectedWard(null);
-                                    setWards([]);
-                                    setQuestions([]);
-                                }
+                        <MultiFilterSelect
+                            options={assemblies.map((assembly) => ({
+                                value: String(assembly.assembly_no),
+                                label: `${assembly.assembly_name_en || `Assembly ${assembly.assembly_no}`} (${assembly.assembly_no})`,
+                            }))}
+                            selection={selectedAssemblyNos}
+                            onChange={(next) => {
+                                setIsCreatingAssembly(false);
+                                setSelectedAssemblyNos(next);
+                                setSelectedWard(null);
+                                setQuestions([]);
+                                setMessage(null);
+                                void fetchWardsForSelection(next);
                             }}
-                            className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10"
+                            allLabel={`All assemblies (${assemblies.length})`}
+                            searchable
+                            searchPlaceholder="Search assemblies…"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsCreatingAssembly((value) => !value);
+                                setMessage(null);
+                            }}
+                            className="w-full rounded-md border border-dashed border-slate-200 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
                         >
-                            <option value="">Choose assembly</option>
-                            {assemblies.map((assembly) => (
-                                <option key={assembly.assembly_no} value={assembly.assembly_no}>
-                                    {assembly.assembly_name_en || `Assembly ${assembly.assembly_no}`} ({assembly.assembly_no})
-                                </option>
-                            ))}
-                            <option value="create">Other - Create new assembly</option>
-                        </select>
+                            {isCreatingAssembly ? "Cancel new assembly" : "Other — Create new assembly"}
+                        </button>
 
                         {isCreatingAssembly && (
                             <>
@@ -432,8 +470,8 @@ export default function WardManagementTab({ responses = [] }: Props) {
                     </div>
 
                     <div className="space-y-1 my-3 max-h-[calc(100vh-410px)] overflow-y-auto pr-1 custom-scrollbar">
-                        {selectedAssemblyNo === null && (
-                            <p className="px-2 py-4 text-center text-xs text-slate-500">Choose or create an assembly to view its wards.</p>
+                        {selectedAssemblyNos.length === 0 && wards.length === 0 && !isCreatingAssembly && (
+                            <p className="px-2 py-4 text-center text-xs text-slate-500">Choose assemblies (or All) to view wards, or create a new assembly.</p>
                         )}
                         {wards.map((ward) => (
                             <div
@@ -484,10 +522,10 @@ export default function WardManagementTab({ responses = [] }: Props) {
                             <button
                                 type="button"
                                 onClick={createWard}
-                                disabled={selectedAssemblyNo === null || loading}
+                                disabled={soleSelectedAssemblyNo == null || loading}
                                 className="w-full py-1.5 bg-slate-900 text-white rounded-md font-semibold text-xs hover:bg-black transition-all disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                                {selectedAssemblyNo === null ? "Select Assembly First" : "Create Ward"}
+                                {soleSelectedAssemblyNo == null ? "Select One Assembly" : "Create Ward"}
                             </button>
                         </div>
                     </div>
